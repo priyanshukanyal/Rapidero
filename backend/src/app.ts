@@ -40,6 +40,7 @@ app.use(`${API_PREFIX}/auth`, authRoutes);
 app.use(`${API_PREFIX}/clients`, clientRoutes);
 app.use(`${API_PREFIX}/contracts`, contractRoutes);
 app.use(`${API_PREFIX}/consignments`, consignmentRoutes);
+app.use(`${API_PREFIX}/client`, clientRoutes);
 
 // Errors
 app.use(notFound);

@@ -2,19 +2,25 @@ import type { Request, Response } from "express";
 import { pool } from "../../db/mysql.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 
+/** -------------------- helpers -------------------- */
 const asNum = (v: any, d = 0) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
 };
-
 const toCode = (v: string | undefined, allowed: string[], def?: string) => {
   const s = (v ?? def ?? "").toUpperCase().trim();
   if (!s) return null;
-  if (!allowed.includes(s))
-    throw new Error({ message: `Invalid code: ${v}` } as any);
+  if (!allowed.includes(s)) throw new Error(`Invalid code: ${v}`);
   return s;
 };
+const isAdminOrOps = (req: Request) => {
+  const roles: string[] = (req as any).user?.roles || [];
+  return roles.includes("ADMIN") || roles.includes("OPS");
+};
+const tokenClientId = (req: Request): string | null =>
+  (req as any).user?.client_id ?? null;
 
+/** -------------------- UI: create CN from portal -------------------- */
 // POST /api/v1/consignments/ui
 export const createCnFromUI = asyncHandler(
   async (req: Request, res: Response) => {
@@ -169,7 +175,7 @@ export const createCnFromUI = asyncHandler(
         );
       }
 
-      // initial status
+      // Initial status
       await conn.query(
         `INSERT INTO consignment_status_history (id, consignment_id, status_code, remarks)
        VALUES (UUID(), ?, 'CREATED', 'CN created via UI')`,
@@ -189,10 +195,12 @@ export const createCnFromUI = asyncHandler(
   }
 );
 
+/** -------------------- UI: fetch by CN number -------------------- */
 // GET /api/v1/consignments/ui/:cnNumber
 export const getCnWithDetails = asyncHandler(
   async (req: Request, res: Response) => {
     const { cnNumber } = req.params;
+
     const [[cn]]: any = await pool.query(
       `SELECT * FROM consignments WHERE cn_number=? LIMIT 1`,
       [cnNumber]
@@ -225,3 +233,61 @@ export const getCnWithDetails = asyncHandler(
     res.json({ ...cn, invoices, packages, history });
   }
 );
+
+/** -------------------- Core: list/detail/tracking -------------------- */
+// GET /api/v1/consignments
+export const listConsignments = asyncHandler(
+  async (req: Request, res: Response) => {
+    const params: any[] = [];
+    let where = " WHERE 1=1 ";
+
+    if (!isAdminOrOps(req)) {
+      const cid = tokenClientId(req);
+      if (!cid) return res.json([]); // no tenant
+      where += " AND client_id = ? ";
+      params.push(cid);
+    }
+
+    if (req.query.q) {
+      where +=
+        " AND (cn_number LIKE ? OR shipper_city LIKE ? OR consignee_city LIKE ?) ";
+      const q = `%${String(req.query.q)}%`;
+      params.push(q, q, q);
+    }
+
+    const [rows] = await pool.query(
+      `SELECT id, cn_number, current_status_code, booking_datetime,
+            shipper_city, consignee_city, actual_weight_kg
+       FROM consignments
+      ${where}
+      ORDER BY created_at DESC
+      LIMIT 200`,
+      params
+    );
+    res.json(rows);
+  }
+);
+
+// GET /api/v1/consignments/:id
+export const getConsignmentById = asyncHandler(
+  async (req: Request, res: Response) => {
+    const [rows] = await pool.query("SELECT * FROM consignments WHERE id=?", [
+      req.params.id,
+    ]);
+    const row = (rows as any[])[0];
+    if (!row) return res.status(404).json({ error: "Not found" });
+    res.json(row);
+  }
+);
+
+// GET /api/v1/consignments/:id/tracking
+export const getTracking = asyncHandler(async (req: Request, res: Response) => {
+  const [rows] = await pool.query(
+    `SELECT status_code, location_text, remarks, event_time
+       FROM consignment_status_history
+      WHERE consignment_id=?
+      ORDER BY event_time`,
+    [req.params.id]
+  );
+  res.json(rows);
+});

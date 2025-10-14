@@ -18,19 +18,26 @@ type AuthState = {
   error: string | null;
   login: (email: string, password: string) => Promise<PortalHome>;
   logout: () => void;
-  hydrate: () => void;
+  hydrate: () => void; // no-op now
 };
 
-export const useAuth = create<AuthState>((set, get) => ({
-  user: null,
-  token: null,
+const bootUser = (() => {
+  try {
+    const s = localStorage.getItem("user");
+    return s ? (JSON.parse(s) as UserInfo) : null;
+  } catch {
+    return null;
+  }
+})();
+const bootToken = localStorage.getItem("token");
+
+export const useAuth = create<AuthState>((set) => ({
+  user: bootUser,
+  token: bootToken,
   loading: false,
   error: null,
-  hydrate: () => {
-    const token = localStorage.getItem("token");
-    const userStr = localStorage.getItem("user");
-    if (token && userStr) set({ token, user: JSON.parse(userStr) as UserInfo });
-  },
+  hydrate: () => {},
+
   login: async (email, password) => {
     set({ loading: true, error: null });
     try {
@@ -50,6 +57,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       throw e;
     }
   },
+
   logout: () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
