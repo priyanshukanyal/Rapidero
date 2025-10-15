@@ -3,7 +3,7 @@ import cors from "cors";
 import morgan from "morgan";
 import { notFound, errorHandler } from "./middleware/errorHandlers.js";
 import { env } from "./config/env.js";
-
+import userRoutes from "./modules/users/users.routes.js";
 import authRoutes from "./modules/auth/auth.routes.js";
 import clientRoutes from "./modules/clients/clients.routes.js";
 import contractRoutes from "./modules/contracts/contracts.routes.js";
@@ -41,7 +41,7 @@ app.use(`${API_PREFIX}/clients`, clientRoutes);
 app.use(`${API_PREFIX}/contracts`, contractRoutes);
 app.use(`${API_PREFIX}/consignments`, consignmentRoutes);
 app.use(`${API_PREFIX}/client`, clientRoutes);
-
+app.use("/api/v1/users", userRoutes);
 // Errors
 app.use(notFound);
 app.use(errorHandler);

@@ -1,5 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
-import { verifyToken } from "../utils/jwt.js";
+// import { verifyToken } from "../utils/jwt.js";
+// example: src/middleware/authGuard.ts
+import { verifyToken, type AppJwtPayload } from "../utils/jwt.js";
 
 export function authGuard(...allowed: string[]) {
   return (req: Request, res: Response, next: NextFunction) => {

@@ -3,6 +3,47 @@ import bcrypt from "bcryptjs";
 import { pool } from "../../db/mysql.js";
 import { sendMail } from "../../utils/mailer.js"; // <— from step 3 below
 import { env } from "../../config/env.js"; // has APP_ORIGIN + SMTP_*
+import { asyncHandler } from "../../utils/asyncHandler.js";
+
+export const listUsersByClient = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { clientId } = req.params;
+    const [rows] = await pool.query(
+      `SELECT u.id AS user_id, u.email, u.name,
+            GROUP_CONCAT(r.code ORDER BY r.code) AS roles
+     FROM client_users cu
+     JOIN users u ON u.id = cu.user_id
+     LEFT JOIN user_roles ur ON ur.user_id = u.id
+     LEFT JOIN roles r ON r.id = ur.role_id
+     WHERE cu.client_id = ?
+     GROUP BY u.id
+     ORDER BY u.email`,
+      [clientId]
+    );
+    res.json(rows);
+  }
+);
+
+export const resetPassword = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { userId } = req.params;
+    const { new_password } = req.body as { new_password?: string };
+
+    if (!new_password || new_password.length < 8) {
+      return res
+        .status(400)
+        .json({ error: "new_password (min 8 chars) required" });
+    }
+    const hash = await bcrypt.hash(new_password, 10);
+    const [result]: any = await pool.query(
+      "UPDATE users SET password_hash=?, updated_at=NOW(6) WHERE id=?",
+      [hash, userId]
+    );
+    if (result.affectedRows === 0)
+      return res.status(404).json({ error: "User not found" });
+    res.json({ ok: true });
+  }
+);
 
 async function getUserIdByEmail(conn: any, email: string) {
   const [rows] = await conn.query("SELECT id FROM users WHERE email=?", [
