@@ -196,6 +196,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   if (!email || !password)
     return res.status(400).json({ error: "email & password required" });
 
+  // 1) Load user
   const [[u]]: any = await pool.query(
     "SELECT id, password_hash, name, email, is_active FROM users WHERE email=? LIMIT 1",
     [email]
@@ -203,9 +204,11 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   if (!u || !u.is_active)
     return res.status(401).json({ error: "Invalid credentials" });
 
+  // 2) Verify password
   const ok = await bcrypt.compare(password, u.password_hash);
   if (!ok) return res.status(401).json({ error: "Invalid credentials" });
 
+  // 3) Roles
   const [rs]: any = await pool.query(
     `SELECT r.code
        FROM user_roles ur
@@ -213,15 +216,25 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
       WHERE ur.user_id=?`,
     [u.id]
   );
-  const roles: string[] = rs.map((x: any) => x.code);
+  const roles: string[] = Array.isArray(rs) ? rs.map((x: any) => x.code) : [];
 
-  // 🔑 Tenant lookup (client_id) for CLIENT/FE users (admins/ops will get null)
-  const [[t]]: any = await pool.query(
-    "SELECT client_id FROM client_users WHERE user_id=? LIMIT 1",
-    [u.id]
-  );
-  const clientId: string | null = t?.client_id ?? null;
+  // 4) Tenant (client_id) — protect against SQL errors
+  let clientId: string | null = null;
+  try {
+    if (roles.includes("CLIENT") || roles.includes("FIELD_EXEC")) {
+      const [link]: any = await pool.query(
+        "SELECT client_id FROM client_users WHERE user_id=? LIMIT 1",
+        [u.id]
+      );
+      clientId = link?.[0]?.client_id ?? null;
+    }
+  } catch (e) {
+    console.error("tenant lookup failed:", e);
+    // don't crash login just because tenant lookup failed
+    clientId = null;
+  }
 
+  // 5) Sign token (catches secret issues early)
   const token = signToken({
     sub: u.id,
     email: u.email,
@@ -229,7 +242,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     client_id: clientId,
   });
 
-  // Non-blocking audit
+  // 6) Audit (non-blocking)
   pool
     .query("UPDATE users SET last_login_at=NOW(6) WHERE id=?", [u.id])
     .catch(() => {});

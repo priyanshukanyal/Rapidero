@@ -10,8 +10,18 @@ export function errorHandler(
   res: Response,
   _next: NextFunction
 ) {
-  console.error(err);
+  // Log everything helpful on the server
+  console.error("❌ ERROR:", {
+    message: err?.message,
+    code: err?.code,
+    stack: err?.stack,
+    sql: err?.sql,
+    sqlMessage: err?.sqlMessage,
+  });
+
   if (err?.code === "ER_DUP_ENTRY")
     return res.status(409).json({ error: "Duplicate record" });
-  res.status(err.status || 500).json({ error: err.message || "Server error" });
+
+  const status = Number(err?.status || err?.statusCode || 500);
+  res.status(status).json({ error: err?.message || "Server error" });
 }

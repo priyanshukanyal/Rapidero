@@ -50,6 +50,9 @@ export default function App() {
             </RequireRole>
           }
         />
+        <Route element={<ProtectedRoute anyOf={["CLIENT"]} />}>
+          <Route path="/client/dashboard" element={<ClientDashboard />} />
+        </Route>
         <Route
           path="/client/consignments/:id"
           element={
