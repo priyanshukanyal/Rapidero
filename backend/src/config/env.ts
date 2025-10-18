@@ -22,6 +22,10 @@ const schema = z.object({
   DB_PASSWORD: z.string(),
   DB_NAME: z.string(),
 
+  // Azure Blob
+  AZURE_STORAGE_CONNECTION_STRING: z.string().optional(),
+  AZURE_BLOB_CONTAINER: z.string().optional(),
+
   // Auth
   JWT_SECRET: z.string().min(16),
 
