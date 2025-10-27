@@ -496,7 +496,7 @@ export default function CnCreate() {
             </button>
           </div>
           <div className="grid md:grid-cols-2 gap-3">
-            {packages.map((p, i) => (
+            {packages.map((p) => (
               <div
                 key={p.id}
                 className="border rounded-lg p-3 grid md:grid-cols-4 gap-2 items-center"
