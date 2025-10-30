@@ -17,6 +17,7 @@ import { RequireRole } from "./components/auth/RequireRole";
 import ClientDashboard from "./pages/client/Dashboard";
 import ClientCNList from "./pages/client/ConsignmentsList";
 import ClientCNView from "./pages/client/ConsignmentView";
+import ClientContracts from "./pages/client/Contracts";
 
 export default function App() {
   return (
@@ -58,6 +59,15 @@ export default function App() {
           element={
             <RequireRole roles={["CLIENT"]}>
               <ClientCNView />
+            </RequireRole>
+          }
+        />
+
+        <Route
+          path="/client/contracts"
+          element={
+            <RequireRole roles={["CLIENT"]}>
+              <ClientContracts />
             </RequireRole>
           }
         />

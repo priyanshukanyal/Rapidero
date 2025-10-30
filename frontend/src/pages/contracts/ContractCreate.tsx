@@ -13,6 +13,7 @@ import type {
   ContractParty,
 } from "../../types";
 
+/* ------------------------------- Factories -------------------------------- */
 const emptyParty = (): ContractParty => ({
   party_role: "CLIENT",
   legal_name: "",
@@ -38,9 +39,10 @@ const emptyVas = (): VasCharge => ({ code: "FRAGILE", flat: 0, pct: 0 });
 const emptyIns = (): InsuranceRule => ({
   min_declared_value: 0,
   rate_pct: 0,
-  provider: "",
+  provider: "STANDARD", // was "Default"
   notes: "",
 });
+
 const emptySlab = (): IncentiveSlab => ({
   threshold_shipments: 0,
   threshold_revenue: 0,
@@ -51,6 +53,22 @@ const emptyAnn = (): ContractAnnexure => ({
   title: "",
   raw_text: "",
 });
+
+/* ------------------------------- Utilities -------------------------------- */
+const ALLOWED_PARTY_ROLES = new Set(["COMPANY", "CLIENT", "OTHER"]);
+const normalizePartyRole = (x: any) => {
+  const v = String(x || "")
+    .toUpperCase()
+    .trim();
+  return ALLOWED_PARTY_ROLES.has(v)
+    ? (v as "COMPANY" | "CLIENT" | "OTHER")
+    : "OTHER";
+};
+
+const toNumberOr = (v: any, d: number) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+};
 
 export default function ContractCreate() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -86,11 +104,12 @@ export default function ContractCreate() {
   useEffect(() => {
     api.get<Client[]>("/clients").then((r) => setClients(r.data));
   }, []);
+
   const set = (k: keyof ContractPayload, v: any) =>
     setBody((b) => ({ ...b, [k]: v }));
 
   const canSave = useMemo(
-    () => body.client_id && body.contract_code,
+    () => Boolean(body.client_id && body.contract_code),
     [body.client_id, body.contract_code]
   );
 
@@ -114,8 +133,132 @@ export default function ContractCreate() {
     if (!canSave) return alert("Client & Contract code are required");
     setSaving(true);
     try {
-      await api.post("/contracts", body);
-      alert("✅ Contract created");
+      // --------- Transform UI model → server model expected by backend ---------
+      // Defensive transforms to avoid NULL/constraint issues
+      const volumetricBases = (body.volumetric_bases || [])
+        .map((v) => toNumberOr(v, 0))
+        .filter((v) => Number.isFinite(v) && v >= 0);
+
+      const parties = (body.parties || [])
+        .map((p) => ({
+          party_role: normalizePartyRole(p.party_role),
+          legal_name: p.legal_name?.trim() || "",
+          contact_person: p.contact_name || null,
+          phone: p.phone || null,
+          email: p.email || null, // <-- backend expects this column now
+          brand_name: null,
+          cin: null,
+          pan: null,
+          address_line1: p.address || null,
+          address_line2: null,
+          city: null,
+          district: null,
+          state: null,
+          postcode: null,
+        }))
+        .filter((p) => p.legal_name.length > 0);
+
+      const oda_rules = (body.oda_rules || [])
+        .map((o) => ({
+          oda_code: (o.pincode_prefix || "").trim(),
+          rate_per_kg: toNumberOr(o.surcharge_pct, 0),
+          min_per_cn: toNumberOr(o.surcharge_flat, 0),
+          notes: null as string | null,
+        }))
+        .filter((r) => r.oda_code.length > 0); // skip blank codes
+
+      // backend requires distance_km_max NOT NULL → send 0 when absent
+      const non_metro_rules = (body.non_metro_rules || []).map((n) => ({
+        distance_km_max: 0, // UI doesn't collect distance—use safe default
+        rate_per_kg: toNumberOr(n.surcharge_flat, 0),
+      }));
+
+      const region_surcharges = (body.region_surcharges || [])
+        .map((r) => ({
+          region_name: (r.region_code || r.description || "").trim(),
+          base_relative_to: null as string | null,
+          addl_rate_per_kg: toNumberOr(r.surcharge_flat, 0),
+          notes: r.description || null,
+        }))
+        .filter((r) => r.region_name.length > 0);
+
+      const vas_charges = (body.vas_charges || []).map((v) => {
+        const isPct = Number(v.pct) > 0;
+        return {
+          vas_code: v.code,
+          calc_method: isPct ? "PCT" : "FLAT",
+          rate_per_kg: isPct ? toNumberOr(v.pct, 0) : null,
+          rate_per_cn: !isPct ? toNumberOr(v.flat, 0) : null,
+          min_per_cn: null,
+          max_per_cn: null,
+          multiplier: null,
+          extra_per_cn: null,
+          free_hours: null,
+          floor_start: null,
+          city_scope: null,
+          notes: null,
+        };
+      });
+
+      const insurance_rules = (body.insurance_rules || []).map((i) => ({
+        insurance_type: (i.provider || "STANDARD").toUpperCase(), // send uppercase
+        pct_of_invoice: toNumberOr(i.rate_pct, 0),
+        min_per_cn: toNumberOr(i.min_declared_value, 0),
+        liability_desc: i.notes || null,
+      }));
+
+      const incentive_slabs = (body.incentive_slabs || []).map((s) => ({
+        tonnage_min: toNumberOr(s.threshold_shipments, 0),
+        tonnage_max:
+          s.threshold_revenue !== undefined && s.threshold_revenue !== null
+            ? toNumberOr(s.threshold_revenue, 0)
+            : null,
+        discount_pct: toNumberOr(s.incentive_pct, 0),
+        from_date: (s as any).from_date || null,
+        to_date: (s as any).to_date || null,
+      }));
+
+      const annexures = (body.annexures || []).map((a) => ({
+        annexure_code: a.annexure_code,
+        title: a.title,
+        raw_text: a.raw_text,
+      }));
+
+      const serverPayload: any = {
+        client_id: body.client_id,
+        contract_code: body.contract_code,
+        // Parent columns
+        purpose: body.purpose || null,
+        agreement_date: body.start_date || null,
+        term_start: body.start_date || null,
+        term_end: body.end_date || null,
+        settlement_frequency: body.settlement_frequency || "DAILY",
+        price_floor_enabled: !!body.price_floor_enabled,
+        price_ceiling_enabled: !!body.price_ceiling_enabled,
+        taxes_gst_pct: toNumberOr(body.taxes_gst_pct, 18),
+        min_chargeable_freight_rs: toNumberOr(body.min_charge, 0),
+
+        volumetric_bases: volumetricBases,
+        parties,
+        oda_rules,
+        non_metro_rules,
+        region_surcharges,
+        vas_charges,
+        insurance_rules,
+        incentive_slabs,
+        annexures,
+        notes: body.notes || "",
+      };
+
+      const { data } = await api.post("/contracts", serverPayload);
+      alert(
+        `✅ Contract created${data?.pdf_url ? `\nPDF: ${data.pdf_url}` : ""}`
+      );
+    } catch (e: any) {
+      alert(
+        e?.response?.data?.error ||
+          "Failed to create contract. Please check required fields."
+      );
     } finally {
       setSaving(false);
     }
@@ -737,17 +880,21 @@ export default function ContractCreate() {
                   <input
                     type="date"
                     className="border rounded px-2 py-1"
-                    value={s.from_date || ""}
+                    value={(s as any).from_date || ""}
                     onChange={(e) =>
-                      up("incentive_slabs", i, { from_date: e.target.value })
+                      up("incentive_slabs", i, {
+                        from_date: e.target.value,
+                      } as any)
                     }
                   />
                   <input
                     type="date"
                     className="border rounded px-2 py-1"
-                    value={s.to_date || ""}
+                    value={(s as any).to_date || ""}
                     onChange={(e) =>
-                      up("incentive_slabs", i, { to_date: e.target.value })
+                      up("incentive_slabs", i, {
+                        to_date: e.target.value,
+                      } as any)
                     }
                   />
                 </div>

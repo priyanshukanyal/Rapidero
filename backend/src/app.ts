@@ -8,6 +8,8 @@ import authRoutes from "./modules/auth/auth.routes.js";
 import clientRoutes from "./modules/clients/clients.routes.js";
 import contractRoutes from "./modules/contracts/contracts.routes.js";
 import consignmentRoutes from "./modules/consignments/consignments.routes.js";
+// in your main server bootstrap (e.g., src/server.ts)
+import path from "node:path";
 
 const app = express();
 
@@ -42,6 +44,19 @@ app.use(`${API_PREFIX}/contracts`, contractRoutes);
 app.use(`${API_PREFIX}/consignments`, consignmentRoutes);
 app.use(`${API_PREFIX}/client`, clientRoutes);
 app.use("/api/v1/users", userRoutes);
+app.use("/storage", express.static(path.join(process.cwd(), "storage")));
+// app.ts (or server.ts)
+app.use((err: any, _req: any, res: any, _next: any) => {
+  console.error("💥 Uncaught error:", err);
+  const status = err.status || 500;
+  const msg = err?.sqlMessage || err?.message || "Internal Server Error";
+  return res.status(status).json({
+    error: msg,
+    code: err?.code,
+    detail: err?.sql || undefined,
+  });
+});
+
 // Errors
 app.use(notFound);
 app.use(errorHandler);

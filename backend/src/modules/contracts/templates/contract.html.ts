@@ -1,5 +1,3 @@
-// src/modules/contracts/templates/contract.html.ts
-
 export interface ContractViewModel {
   contract: any;
   client: any;
