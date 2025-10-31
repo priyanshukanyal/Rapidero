@@ -50,6 +50,8 @@ export const listClients = asyncHandler(
 
 export const clientDashboard = asyncHandler(
   async (req: Request, res: Response) => {
+    const request = req as any;
+    console.log(request.user);
     const clientId: string | null = (req as any).user?.client_id ?? null;
     if (!clientId) return res.status(403).json({ error: "Forbidden" });
 

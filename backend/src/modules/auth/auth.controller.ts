@@ -216,23 +216,26 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
       WHERE ur.user_id=?`,
     [u.id]
   );
+
+  console.log("roles:", rs);
   const roles: string[] = Array.isArray(rs) ? rs.map((x: any) => x.code) : [];
 
   // 4) Tenant (client_id) — protect against SQL errors
   let clientId: string | null = null;
-  try {
-    if (roles.includes("CLIENT") || roles.includes("FIELD_EXEC")) {
-      const [link]: any = await pool.query(
-        "SELECT client_id FROM client_users WHERE user_id=? LIMIT 1",
-        [u.id]
-      );
-      clientId = link?.[0]?.client_id ?? null;
-    }
-  } catch (e) {
-    console.error("tenant lookup failed:", e);
-    // don't crash login just because tenant lookup failed
-    clientId = null;
+  // try {
+  if (roles.includes("CLIENT") || roles.includes("FIELD_EXEC")) {
+    const [link]: any = await pool.query(
+      "SELECT client_id FROM client_users WHERE user_id=? LIMIT 1",
+      [u.id]
+    );
+    console.log("clientId:", clientId, link);
+    clientId = link?.[0]?.client_id ?? null;
   }
+  // } catch (e) {
+  //   console.error("tenant lookup failed:", e);
+  //   // don't crash login just because tenant lookup failed
+  //   clientId = null;
+  // }
 
   // 5) Sign token (catches secret issues early)
   const token = signToken({

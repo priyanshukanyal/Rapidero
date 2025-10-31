@@ -175,7 +175,7 @@ export async function inviteUser(req: Request, res: Response) {
 
     for (const code of roles) {
       await conn.query(
-        "INSERT IGNORE INTO user_roles (user_id, role_id) VALUES (?,?)",
+        "INSERT INTO user_roles (user_id, role_id) VALUES (?,?)",
         [userId, roleIdsMap[code]]
       );
     }
@@ -185,7 +185,7 @@ export async function inviteUser(req: Request, res: Response) {
       (roles.includes("CLIENT") || roles.includes("FIELD_EXEC"))
     ) {
       await conn.query(
-        "INSERT IGNORE INTO client_users (client_id, user_id) VALUES (?,?)",
+        "INSERT INTO client_users (client_id, user_id) VALUES (?,?)",
         [client_id, userId]
       );
     }
