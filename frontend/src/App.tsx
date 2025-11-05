@@ -15,8 +15,8 @@ import FieldDashboard from "./pages/field/FieldDashboard";
 import UsersPage from "./pages/admin/UsersPage";
 import { RequireRole } from "./components/auth/RequireRole";
 import ClientDashboard from "./pages/client/Dashboard";
-import ClientCNList from "./pages/client/ConsignmentsList";
-import ClientCNView from "./pages/client/ConsignmentView";
+// import ClientCNList from "./pages/client/ConsignmentsList";
+// import ClientCNView from "./pages/client/ConsignmentView";
 import ClientContracts from "./pages/client/Contracts";
 
 export default function App() {
@@ -43,25 +43,25 @@ export default function App() {
             </RequireRole>
           }
         />
-        <Route
+        {/* <Route
           path="/client/consignments"
           element={
             <RequireRole roles={["CLIENT"]}>
               <ClientCNList />
             </RequireRole>
           }
-        />
+        /> */}
         <Route element={<ProtectedRoute anyOf={["CLIENT"]} />}>
           <Route path="/client/dashboard" element={<ClientDashboard />} />
         </Route>
-        <Route
+        {/* <Route
           path="/client/consignments/:id"
           element={
             <RequireRole roles={["CLIENT"]}>
               <ClientCNView />
             </RequireRole>
           }
-        />
+        /> */}
 
         <Route
           path="/client/contracts"

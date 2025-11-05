@@ -99,6 +99,18 @@ type ZoneRow = {
   cities: string[]; // UI only; saved as CSV in coverage_areas
 };
 
+/** NEW: Rate Matrix row type */
+type RateRow = {
+  id: string; // UI only
+  origin_city: string;
+  origin_pincode?: string | null;
+  dest_city: string;
+  dest_pincode?: string | null;
+  cft_base: number; // int in DB
+  base_rate_rs: number; // decimal(12,2)
+  currency?: string | null; // default "INR"
+};
+
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 /* -------------------------------------------------------------------------- */
@@ -760,7 +772,7 @@ export default function ContractCreate() {
         } as Party,
       ],
 
-      // tables
+      // tables (UI state names)
       metro_cities: PDF_DEFAULTS.metro_cities.map((city) => ({
         city,
         charge_per_cn: 0,
@@ -774,6 +786,9 @@ export default function ContractCreate() {
 
       // zones (UI)
       zones,
+
+      // NEW: rate matrix (start empty; use UI to add)
+      rate_matrix: [] as RateRow[],
 
       // extra sections to ensure PDF tables never blank by mistake
       region_surcharges: [
@@ -842,6 +857,32 @@ export default function ContractCreate() {
         coverage_areas: z.cities.join(", "),
       }));
 
+      // NEW: rate_matrix payload mapping
+      const rate_matrix = ((body.rate_matrix as RateRow[]) || [])
+        .filter(
+          (r) =>
+            r &&
+            r.origin_city &&
+            r.dest_city &&
+            Number.isFinite(Number(r.cft_base)) &&
+            Number.isFinite(Number(r.base_rate_rs))
+        )
+        .map((r) => ({
+          origin_city: r.origin_city.trim(),
+          origin_pincode: (r.origin_pincode || "").trim() || null,
+          dest_city: r.dest_city.trim(),
+          dest_pincode: (r.dest_pincode || "").trim() || null,
+          cft_base: Number(r.cft_base),
+          base_rate_rs: Number(r.base_rate_rs),
+          currency: r.currency || "INR",
+        }));
+
+      // 🔁 Align payload keys to backend controller:
+      // - oda_rules
+      // - insurance_rules
+      // - incentive_slabs
+      // - metro_congestion_cities
+      // - vas_charges (UPDATED KEY)
       const payload = {
         client_id: body.client_id,
         contract_code: body.contract_code,
@@ -908,15 +949,21 @@ export default function ContractCreate() {
           0
         ),
 
-        // tables aligned to PDF VM keys
+        // 🔑 Back-end expected keys
         parties,
-        metro_cities: body.metro_cities,
-        oda: body.oda,
-        insurance: body.insurance,
-        vas: body.vas,
+        metro_congestion_cities: body.metro_cities, // rename
+        oda_rules: body.oda, // rename
+        insurance_rules: body.insurance, // rename
+
+        /** UPDATED: key must be vas_charges for backend to insert */
+        vas_charges: body.vas,
+
         special_handling: body.special_handling,
         pickup_charges: body.pickup_charges,
         zone_rates,
+
+        /** NEW: send rate matrix */
+        rate_matrix,
 
         region_surcharges: stripEmptyRows(body.region_surcharges || [], [
           "region_name",
@@ -925,10 +972,10 @@ export default function ContractCreate() {
           "distance_km_max",
           "rate_per_kg",
         ]),
-        incentives: stripEmptyRows(body.incentives || [], [
+        incentive_slabs: stripEmptyRows(body.incentives || [], [
           "tonnage_min",
           "discount_pct",
-        ]),
+        ]), // rename
         annexures: stripEmptyRows(body.annexures || [], [
           "annexure_code",
           "title",
@@ -1751,6 +1798,112 @@ export default function ContractCreate() {
                   }}
                 />
               </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* NEW: RATE MATRIX */}
+      <section className="bg-white p-6 rounded-xl shadow">
+        <div className="flex items-center justify-between mb-2">
+          <div className="font-medium">Rate Matrix</div>
+          <button
+            className="text-sm px-2 py-1 rounded bg-gray-100"
+            onClick={() =>
+              set("rate_matrix", [
+                ...((body.rate_matrix as RateRow[]) || []),
+                {
+                  id: uid(),
+                  origin_city: "",
+                  origin_pincode: "",
+                  dest_city: "",
+                  dest_pincode: "",
+                  cft_base: 6,
+                  base_rate_rs: 0,
+                  currency: "INR",
+                } as RateRow,
+              ])
+            }
+          >
+            + Add Row
+          </button>
+        </div>
+
+        <div className="grid gap-2">
+          {((body.rate_matrix as RateRow[]) || []).map((r, i) => (
+            <div
+              key={r.id || i}
+              className="grid md:grid-cols-6 gap-2 border rounded p-3"
+            >
+              <input
+                placeholder="Origin City"
+                className="border rounded px-2 py-1"
+                value={r.origin_city}
+                onChange={(e) => {
+                  const arr = [...(body.rate_matrix as RateRow[])];
+                  arr[i] = { ...arr[i], origin_city: e.target.value };
+                  set("rate_matrix", arr);
+                }}
+              />
+              <input
+                placeholder="Origin Pincode (opt)"
+                className="border rounded px-2 py-1"
+                value={r.origin_pincode || ""}
+                onChange={(e) => {
+                  const arr = [...(body.rate_matrix as RateRow[])];
+                  arr[i] = {
+                    ...arr[i],
+                    origin_pincode: e.target.value || null,
+                  };
+                  set("rate_matrix", arr);
+                }}
+              />
+              <input
+                placeholder="Destination City"
+                className="border rounded px-2 py-1"
+                value={r.dest_city}
+                onChange={(e) => {
+                  const arr = [...(body.rate_matrix as RateRow[])];
+                  arr[i] = { ...arr[i], dest_city: e.target.value };
+                  set("rate_matrix", arr);
+                }}
+              />
+              <input
+                placeholder="Destination Pincode (opt)"
+                className="border rounded px-2 py-1"
+                value={r.dest_pincode || ""}
+                onChange={(e) => {
+                  const arr = [...(body.rate_matrix as RateRow[])];
+                  arr[i] = { ...arr[i], dest_pincode: e.target.value || null };
+                  set("rate_matrix", arr);
+                }}
+              />
+              <input
+                type="number"
+                placeholder="CFT Base (e.g., 6)"
+                className="border rounded px-2 py-1"
+                value={r.cft_base}
+                onChange={(e) => {
+                  const arr = [...(body.rate_matrix as RateRow[])];
+                  arr[i] = { ...arr[i], cft_base: Number(e.target.value || 0) };
+                  set("rate_matrix", arr);
+                }}
+              />
+              <input
+                type="number"
+                step="0.01"
+                placeholder="Base Rate (₹)"
+                className="border rounded px-2 py-1"
+                value={r.base_rate_rs}
+                onChange={(e) => {
+                  const arr = [...(body.rate_matrix as RateRow[])];
+                  arr[i] = {
+                    ...arr[i],
+                    base_rate_rs: Number(e.target.value || 0),
+                  };
+                  set("rate_matrix", arr);
+                }}
+              />
             </div>
           ))}
         </div>

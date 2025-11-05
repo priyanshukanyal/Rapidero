@@ -247,6 +247,33 @@ async function findClientRecipient(clientId: string) {
   return null;
 }
 
+/** Coerce flexible numbers like "6,000", " ₹1,200 ", "125.50" -> number | null */
+function numOrNull(v: any): number | null {
+  if (v == null) return null;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const s = String(v).trim();
+  if (!s) return null;
+  // remove commas, currency symbols, extra spaces
+  const cleaned = s.replace(/[,\s₹$]/g, "");
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Shorthand for integer fields (keeps null if not parseable) */
+function intOrNull(v: any): number | null {
+  const n = numOrNull(v);
+  return n == null ? null : Math.trunc(n);
+}
+
+/** Prefer the first non-empty string among aliases */
+function sFirst(...vals: any[]): string | null {
+  for (const v of vals) {
+    const t = sOr(v, null);
+    if (t) return t;
+  }
+  return null;
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                  Handlers                                  */
 /* -------------------------------------------------------------------------- */
@@ -340,6 +367,11 @@ export const getContract = asyncHandler(async (req: Request, res: Response) => {
     `SELECT * FROM contract_zone_rates WHERE contract_id=?`,
     [id]
   );
+  const [rateMatrix]: any = await pool.query(
+    `SELECT origin_city,origin_pincode,dest_city,dest_pincode,cft_base,base_rate_rs,currency
+       FROM contract_rate_matrix WHERE contract_id=?`,
+    [id]
+  );
 
   res.json({
     ...c,
@@ -356,6 +388,7 @@ export const getContract = asyncHandler(async (req: Request, res: Response) => {
     special_handling: sh,
     pickup_charges: pickup,
     zone_rates: zones,
+    rate_matrix: rateMatrix,
   });
 });
 
@@ -812,14 +845,222 @@ export const createContract = asyncHandler(
         );
       }
 
+      // ✅ NEW (robust): VAS charges with alias & number cleaning
+      const vasInput = Array.isArray(b.vas_charges)
+        ? b.vas_charges
+        : Array.isArray((b as any).vasCharges)
+        ? (b as any).vasCharges
+        : null;
+
+      if (Array.isArray(vasInput)) {
+        const cols = await getTableColumns(conn, "contract_vas_charges");
+        const baseCols = ["id", "contract_id", "vas_code", "calc_method"];
+        const optCols: string[] = [];
+        const may = (c: string) => cols.has(c) && optCols.push(c);
+        may("rate_per_kg");
+        may("rate_per_cn");
+        may("min_per_cn");
+        may("max_per_cn");
+        may("multiplier");
+        may("extra_per_cn");
+        may("free_hours");
+        may("floor_start");
+        may("city_scope");
+        may("notes");
+        const allCols = [...baseCols, ...optCols];
+
+        // Normalize each item with generous aliases
+        const normalized = vasInput.map((v: any) => ({
+          vas_code: sFirst(v.vas_code, v.vasCode, v.code, v.name),
+          calc_method: sFirst(v.calc_method, v.method, v.calcMethod, "PER_CN")!,
+          rate_per_kg: numOrNull(
+            v.rate_per_kg ?? v.ratePerKg ?? v.rate_kg ?? v.perKg
+          ),
+          rate_per_cn: numOrNull(
+            v.rate_per_cn ?? v.ratePerCn ?? v.rate_cn ?? v.perCn ?? v.rate
+          ),
+          min_per_cn: numOrNull(v.min_per_cn ?? v.min ?? v.minCn),
+          max_per_cn: numOrNull(v.max_per_cn ?? v.max ?? v.maxCn),
+          multiplier: v.multiplier != null ? Number(v.multiplier) : null,
+          extra_per_cn: numOrNull(v.extra_per_cn ?? v.extra ?? v.extraCn),
+          free_hours: intOrNull(v.free_hours),
+          floor_start: intOrNull(v.floor_start),
+          city_scope: sFirst(v.city_scope, v.cityScope, v.city, v.scope),
+          notes: sFirst(v.notes, v.note, v.desc, v.description),
+        }));
+
+        const bad = normalized.filter((x) => !x.vas_code);
+        if (bad.length) {
+          console.warn(
+            "[contracts] VAS skipped rows (missing vas_code):",
+            bad.length
+          );
+        }
+
+        const rows = normalized
+          .filter((x) => !!x.vas_code)
+          .map((v) => {
+            const values: any[] = [
+              /* contract_id */ contractId,
+              /* vas_code */ v.vas_code!,
+              /* calc_method */ v.calc_method!,
+            ];
+            if (optCols.includes("rate_per_kg")) values.push(v.rate_per_kg);
+            if (optCols.includes("rate_per_cn")) values.push(v.rate_per_cn);
+            if (optCols.includes("min_per_cn")) values.push(v.min_per_cn);
+            if (optCols.includes("max_per_cn")) values.push(v.max_per_cn);
+            if (optCols.includes("multiplier")) values.push(v.multiplier);
+            if (optCols.includes("extra_per_cn")) values.push(v.extra_per_cn);
+            if (optCols.includes("free_hours")) values.push(v.free_hours);
+            if (optCols.includes("floor_start")) values.push(v.floor_start);
+            if (optCols.includes("city_scope")) values.push(v.city_scope);
+            if (optCols.includes("notes")) values.push(v.notes);
+            return values;
+          });
+
+        if (!rows.length) {
+          console.warn("[contracts] No VAS rows produced after normalization.");
+        } else {
+          const placeholdersOneRow = `(UUID(), ?, ?, ?${optCols
+            .map(() => ", ?")
+            .join("")})`;
+          await conn.query(
+            `INSERT INTO contract_vas_charges (${allCols.join(",")})
+       VALUES ${rows.map(() => placeholdersOneRow).join(",")}`,
+            rows.flat()
+          );
+        }
+      }
+
+      // ✅ NEW (robust): Rate Matrix (supports many aliases + number cleaning)
+      const rateMatrixInput = Array.isArray(b.rate_matrix)
+        ? b.rate_matrix
+        : Array.isArray((b as any).rateMatrix)
+        ? (b as any).rateMatrix
+        : null;
+
+      if (Array.isArray(rateMatrixInput)) {
+        const rmCols = await getTableColumns(conn, "contract_rate_matrix");
+        const baseCols = [
+          "id",
+          "contract_id",
+          "origin_city",
+          "dest_city",
+          "cft_base",
+          "base_rate_rs",
+          "currency",
+        ];
+        const optCols: string[] = [];
+        const may = (c: string) => rmCols.has(c) && optCols.push(c);
+        may("origin_pincode");
+        may("dest_pincode");
+        const allCols = [...baseCols, ...optCols];
+
+        const normalized = rateMatrixInput.map((r: any) => ({
+          origin_city: sFirst(
+            r.origin_city,
+            r.originCity,
+            r.origin,
+            r.from_city,
+            r.fromCity,
+            r.from
+          ),
+          origin_pincode: sFirst(
+            r.origin_pincode,
+            r.from_pincode,
+            r.fromPin,
+            r.from_pincode_prefix
+          ),
+          dest_city: sFirst(
+            r.dest_city,
+            r.destination,
+            r.destCity,
+            r.to_city,
+            r.toCity,
+            r.to
+          ),
+          dest_pincode: sFirst(
+            r.dest_pincode,
+            r.to_pincode,
+            r.toPin,
+            r.to_pincode_prefix
+          ),
+          cft_base: numOrNull(
+            r.cft_base ?? r.cftBase ?? r.volumetric_base ?? r.volBase ?? r.cft
+          ),
+          base_rate_rs: numOrNull(
+            r.base_rate_rs ??
+              r.baseRateRs ??
+              r.base_rate ??
+              r.baseRate ??
+              r.rate
+          ),
+          currency: sFirst(r.currency, r.curr, r.ccy, "INR")!,
+        }));
+
+        const missing = normalized.filter(
+          (x) =>
+            !x.origin_city ||
+            !x.dest_city ||
+            x.cft_base == null ||
+            x.base_rate_rs == null
+        );
+        if (missing.length) {
+          console.warn(
+            "[contracts] RateMatrix skipped rows (missing required fields origin/dest/cft_base/base_rate):",
+            missing.length
+          );
+        }
+
+        const rows = normalized
+          .filter(
+            (x) =>
+              x.origin_city &&
+              x.dest_city &&
+              x.cft_base != null &&
+              x.base_rate_rs != null
+          )
+          .map((x) => {
+            const fixedVals: any[] = [
+              /* contract_id */ contractId,
+              x.origin_city!,
+              x.dest_city!,
+              x.cft_base!,
+              x.base_rate_rs!,
+              x.currency!,
+            ];
+            const optVals: any[] = [];
+            if (optCols.includes("origin_pincode"))
+              optVals.push(x.origin_pincode ?? null);
+            if (optCols.includes("dest_pincode"))
+              optVals.push(x.dest_pincode ?? null);
+            return [...fixedVals, ...optVals];
+          });
+
+        if (!rows.length) {
+          console.warn(
+            "[contracts] No RateMatrix rows produced after normalization."
+          );
+        } else {
+          const placeholdersOneRow = `(UUID(), ?, ?, ?, ?, ?, ?${optCols
+            .map(() => ", ?")
+            .join("")})`;
+          await conn.query(
+            `INSERT INTO contract_rate_matrix (${allCols.join(",")})
+       VALUES ${rows.map(() => placeholdersOneRow).join(",")}`,
+            rows.flat()
+          );
+        }
+      }
+
       // NEW: Zone rates (auto-detect zone column name & optional columns)
       if (Array.isArray(b.zone_rates)) {
-        const cols = await getTableColumns(conn, "contract_zone_rates");
-        const zoneCol = cols.has("zone_name")
+        const zcols = await getTableColumns(conn, "contract_zone_rates");
+        const zoneCol = zcols.has("zone_name")
           ? "zone_name"
-          : cols.has("zone")
+          : zcols.has("zone")
           ? "zone"
-          : cols.has("zone_code")
+          : zcols.has("zone_code")
           ? "zone_code"
           : null;
 
@@ -830,10 +1071,10 @@ export const createContract = asyncHandler(
         } else {
           const baseCols = ["id", "contract_id", zoneCol];
           const optCols: string[] = [];
-          if (cols.has("rate_per_kg")) optCols.push("rate_per_kg");
-          if (cols.has("tat_days")) optCols.push("tat_days");
-          if (cols.has("min_cn_rs")) optCols.push("min_cn_rs");
-          if (cols.has("coverage_areas")) optCols.push("coverage_areas");
+          if (zcols.has("rate_per_kg")) optCols.push("rate_per_kg");
+          if (zcols.has("tat_days")) optCols.push("tat_days");
+          if (zcols.has("min_cn_rs")) optCols.push("min_cn_rs");
+          if (zcols.has("coverage_areas")) optCols.push("coverage_areas");
 
           const allCols = [...baseCols, ...optCols];
 
