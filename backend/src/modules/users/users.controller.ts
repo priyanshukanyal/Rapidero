@@ -204,7 +204,7 @@ export async function inviteUser(req: Request, res: Response) {
             <li><b>Portal:</b> <a href="${loginUrl}">${loginUrl}</a></li>
             <li><b>Email:</b> ${email}</li>
             <li><b>Temporary Password:</b> ${temp}</li>
-            <li><b>Roles:</b> ${roles.join(", ")}</li>
+            <li><b>Profile:</b> ${roles.join(", ")}</li>
           </ul>
           <p>Please log in and change your password immediately.</p>
         </div>`,

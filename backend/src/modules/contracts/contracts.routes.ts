@@ -1,16 +1,4 @@
-// import { Router } from "express";
-// import { authGuard } from "../../middleware/authGuard.js";
-// import {
-//   createContract,
-//   getContract,
-//   listContracts,
-// } from "./contracts.controller.js";
-
-// const r = Router();
-// r.post("/", authGuard("ADMIN", "OPS"), createContract);
-// r.get("/", authGuard("ADMIN", "OPS", "CLIENT"), listContracts);
-// r.get("/:id", authGuard("ADMIN", "OPS", "CLIENT"), getContract);
-// export default r;
+// src/modules/contracts/index.routes.ts
 import { Router } from "express";
 import { authGuard } from "../../middleware/authGuard.js";
 import {
@@ -18,18 +6,24 @@ import {
   getContract,
   listContracts,
   listMyContracts,
+  resendContractPdf,
 } from "./contracts.controller.js";
 
 const r = Router();
 
+// Create new contract (ADMIN/OPS only)
 r.post("/", authGuard("ADMIN", "OPS"), createContract);
 
-// ADMIN/OPS list; CLIENT sees only theirs (enforced in controller)
+// Mixed list: ADMIN/OPS see all (optional client_id filter), CLIENT sees only their client_id
 r.get("/", authGuard("ADMIN", "OPS", "CLIENT"), listContracts);
 
-// Optional dedicated "mine" endpoint (client portal)
+// Client-convenience endpoint: "my contracts"
 r.get("/mine", authGuard("CLIENT"), listMyContracts);
 
+// Fetch a specific contract
 r.get("/:id", authGuard("ADMIN", "OPS", "CLIENT"), getContract);
-// src/routes/contracts.ts
+
+// Resend/regenerate PDF + email
+r.post("/:id/send", authGuard("ADMIN", "OPS", "CLIENT"), resendContractPdf);
+
 export default r;

@@ -33,6 +33,7 @@ const normalizePartyRole = (x: any) => {
     .trim();
   return ALLOWED_PARTY_ROLES.has(v) ? v : "OTHER";
 };
+
 const nOr = (v: any, d = 0) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
@@ -42,6 +43,17 @@ const sOr = (v: any, d: string | null = null) => {
   const t = s.trim();
   return t.length ? t : d;
 };
+
+/** Basic normalizers for IDs */
+const normUP = (s?: string | null) => (s ? s.trim().toUpperCase() : null);
+const normPAN = (s?: string | null) =>
+  s ? s.trim().toUpperCase().replace(/\s+/g, "") : null;
+const normGST = (s?: string | null) =>
+  s ? s.trim().toUpperCase().replace(/\s+/g, "") : null;
+const normTAN = (s?: string | null) =>
+  s ? s.trim().toUpperCase().replace(/\s+/g, "") : null;
+const normCIN = (s?: string | null) =>
+  s ? s.trim().toUpperCase().replace(/\s+/g, "") : null;
 
 /** Read ENUM allowed values for a table.column from information_schema */
 async function getEnumAllowedValues(
@@ -65,7 +77,7 @@ async function getEnumAllowedValues(
     .map((x) => x.trim().replace(/^'/, "").replace(/'$/, ""));
 }
 
-/** Coerce an incoming value to the ENUM set (case-insensitive). Fallback to first */
+/** Coerce incoming value to ENUM set (case-insensitive). Fallback to first if no match */
 function coerceToEnum(value: any, allowed: string[]): string {
   if (!allowed?.length) return String(value ?? "");
   const incoming = String(value ?? "").trim();
@@ -73,6 +85,53 @@ function coerceToEnum(value: any, allowed: string[]): string {
   if (allowed.includes(incoming)) return incoming;
   const found = allowed.find((a) => a.toLowerCase() === incoming.toLowerCase());
   return found ?? allowed[0];
+}
+
+/** get set of existing columns for a table */
+async function getTableColumns(
+  conn: any,
+  tableName: string
+): Promise<Set<string>> {
+  const [rows]: any = await conn.query(
+    `SELECT COLUMN_NAME
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?`,
+    [tableName]
+  );
+  return new Set((rows || []).map((r: any) => r.COLUMN_NAME));
+}
+
+async function tableHasColumn(
+  conn: any,
+  tableName: string,
+  columnName: string
+) {
+  const cols = await getTableColumns(conn, tableName);
+  return cols.has(columnName);
+}
+
+/** charging mechanism/odd-size normalization to likely enum spellings */
+function normalizeCharging(x: any) {
+  const raw = String(x ?? "")
+    .toUpperCase()
+    .trim();
+  const map: Record<string, string> = {
+    HIGHER_OF_ACTUAL_OR_VOL: "HIGHER_OF_ACTUAL_OR_VOLUMETRIC",
+    VOLUMETRIC_ONLY: "VOLUMETRIC_WEIGHT_ONLY",
+  };
+  return map[raw] || raw || "HIGHER_OF_ACTUAL_OR_VOLUMETRIC";
+}
+function normalizeOddPricing(x: any) {
+  const raw = String(x ?? "")
+    .toUpperCase()
+    .replace(/\s+/g, "_");
+  const map: Record<string, string> = {
+    ON_ACTUALS: "ON_ACTUALS",
+    ON_ACTUAL: "ON_ACTUALS",
+    "ON_ACTUALS.": "ON_ACTUALS",
+  };
+  return map[raw] || "ON_ACTUALS";
 }
 
 /** Build a view-model to render the contract (post-commit) */
@@ -124,6 +183,24 @@ async function loadContractVM(contractId: string) {
     [contractId]
   );
 
+  // NEW collections
+  const [metro_cities]: any = await pool.query(
+    `SELECT * FROM contract_metro_congestion_cities WHERE contract_id=?`,
+    [contractId]
+  );
+  const [special_handling]: any = await pool.query(
+    `SELECT * FROM contract_special_handling_charges WHERE contract_id=?`,
+    [contractId]
+  );
+  const [pickup_charges]: any = await pool.query(
+    `SELECT * FROM contract_pickup_charges WHERE contract_id=?`,
+    [contractId]
+  );
+  const [zone_rates]: any = await pool.query(
+    `SELECT * FROM contract_zone_rates WHERE contract_id=?`,
+    [contractId]
+  );
+
   return {
     contract,
     client,
@@ -136,6 +213,10 @@ async function loadContractVM(contractId: string) {
     insurance,
     incentives,
     rateMatrix,
+    metro_cities,
+    special_handling,
+    pickup_charges,
+    zone_rates,
   };
 }
 
@@ -206,16 +287,16 @@ export const getContract = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const [vol]: any = await pool.query(
-    `SELECT cft_base FROM contract_volumetric_bases WHERE contract_id=?`,
+    `SELECT cft_base, basis_text FROM contract_volumetric_bases WHERE contract_id=?`,
     [id]
   );
   const [party]: any = await pool.query(
-    `SELECT party_role,legal_name,brand_name,cin,pan,address_line1,address_line2,city,district,state,postcode,phone,contact_person,email
+    `SELECT party_role,legal_name,brand_name,cin,pan,gstin,tan,address_line1,address_line2,city,district,state,postcode,phone,contact_person,email
        FROM contract_parties WHERE contract_id=?`,
     [id]
   );
   const [oda]: any = await pool.query(
-    `SELECT oda_code,rate_per_kg,min_per_cn,notes FROM contract_oda_charges WHERE contract_id=?`,
+    `SELECT oda_code,oda_label,rate_per_kg,min_per_cn,max_per_cn,notes FROM contract_oda_charges WHERE contract_id=?`,
     [id]
   );
   const [nm]: any = await pool.query(
@@ -243,10 +324,26 @@ export const getContract = asyncHandler(async (req: Request, res: Response) => {
     `SELECT annexure_code,title,raw_text FROM contract_annexures WHERE contract_id=?`,
     [id]
   );
+  const [metro]: any = await pool.query(
+    `SELECT city, charge_per_cn, notes FROM contract_metro_congestion_cities WHERE contract_id=?`,
+    [id]
+  );
+  const [sh]: any = await pool.query(
+    `SELECT range_min_kg, range_max_kg, rate_per_kg FROM contract_special_handling_charges WHERE contract_id=?`,
+    [id]
+  );
+  const [pickup]: any = await pool.query(
+    `SELECT service_code, rate_per_kg, min_per_pickup, notes FROM contract_pickup_charges WHERE contract_id=?`,
+    [id]
+  );
+  const [zones]: any = await pool.query(
+    `SELECT * FROM contract_zone_rates WHERE contract_id=?`,
+    [id]
+  );
 
   res.json({
     ...c,
-    volumetric_bases: vol.map((x: any) => x.cft_base),
+    volumetric_bases: vol,
     parties: party,
     oda_rules: oda,
     non_metro_rules: nm,
@@ -255,6 +352,10 @@ export const getContract = asyncHandler(async (req: Request, res: Response) => {
     insurance_rules: ins,
     incentive_slabs: inc,
     annexures: ann,
+    metro_congestion_cities: metro,
+    special_handling: sh,
+    pickup_charges: pickup,
+    zone_rates: zones,
   });
 });
 
@@ -272,6 +373,53 @@ export const createContract = asyncHandler(
 
     try {
       await conn.beginTransaction();
+
+      // --- ENUM coercions (avoid truncation) ---
+      const chargingAllowed = await getEnumAllowedValues(
+        conn,
+        "contracts",
+        "charging_mechanism"
+      );
+      const roundingAllowed = await getEnumAllowedValues(
+        conn,
+        "contracts",
+        "rounding_rule"
+      );
+      const oddSizeAllowed = await getEnumAllowedValues(
+        conn,
+        "contracts",
+        "odd_size_pricing"
+      );
+      const contractTypeAllowed = await getEnumAllowedValues(
+        conn,
+        "contracts",
+        "contract_type"
+      );
+      const settleAllowed = await getEnumAllowedValues(
+        conn,
+        "contracts",
+        "settlement_frequency"
+      );
+
+      const charging_mechanism = chargingAllowed.length
+        ? coerceToEnum(normalizeCharging(b.charging_mechanism), chargingAllowed)
+        : normalizeCharging(b.charging_mechanism);
+
+      const rounding_rule = roundingAllowed.length
+        ? coerceToEnum(b.rounding_rule || "ROUND_UP", roundingAllowed)
+        : b.rounding_rule || "ROUND_UP";
+
+      const odd_size_pricing = oddSizeAllowed.length
+        ? coerceToEnum(normalizeOddPricing(b.odd_size_pricing), oddSizeAllowed)
+        : normalizeOddPricing(b.odd_size_pricing) || "ON_ACTUALS";
+
+      const contract_type = contractTypeAllowed.length
+        ? coerceToEnum(b.contract_type || "GENERAL", contractTypeAllowed)
+        : b.contract_type || "GENERAL";
+
+      const settlement_frequency = settleAllowed.length
+        ? coerceToEnum(b.settlement_frequency || "MONTHLY", settleAllowed)
+        : b.settlement_frequency || "MONTHLY";
 
       // --------------------- Parent INSERT ---------------------
       const parentCols = [
@@ -299,11 +447,21 @@ export const createContract = asyncHandler(
         "taxes_gst_pct",
         "metro_congestion_charge_per_cn",
         "cn_charge_per_cn",
+        "docket_charge_per_cn",
         "min_chargeable_weight_kg",
         "min_chargeable_freight_rs",
         "fuel_base_pct",
         "fuel_diesel_base_price",
         "fuel_slope_pct_per_1pct",
+        "contract_type",
+        "payment_terms_days",
+        "charging_mechanism",
+        "rounding_rule",
+        "opa_excluded",
+        "odd_size_len_ft",
+        "odd_size_wid_ft",
+        "odd_size_ht_ft",
+        "odd_size_pricing",
       ];
       const parentVals = [
         contractId,
@@ -324,26 +482,36 @@ export const createContract = asyncHandler(
         b.prepayment_required ? 1 : 0,
         b.capacity_booking_day_of_month ?? null,
         b.capacity_additional_notice_days ?? null,
-        sOr(b.settlement_frequency || "DAILY")!,
+        settlement_frequency,
         b.price_floor_enabled ? 1 : 0,
         b.price_ceiling_enabled ? 1 : 0,
         nOr(b.taxes_gst_pct ?? 18, 18),
         nOr(b.metro_congestion_charge_per_cn ?? 0, 0),
         nOr(b.cn_charge_per_cn ?? 0, 0),
+        nOr(b.docket_charge_per_cn ?? 0, 0),
         nOr(b.min_chargeable_weight_kg ?? 20, 20),
-        nOr(b.min_chargeable_freight_rs ?? b.min_charge ?? 200, 0),
+        nOr(b.min_chargeable_freight_rs ?? b.min_charge ?? 0, 0),
         b.fuel_base_pct ?? null,
         b.fuel_diesel_base_price ?? null,
         b.fuel_slope_pct_per_1pct ?? null,
+        contract_type,
+        b.payment_terms_days ?? 15,
+        charging_mechanism,
+        rounding_rule,
+        b.opa_excluded ? 1 : 0,
+        b.odd_size_len_ft ?? null,
+        b.odd_size_wid_ft ?? null,
+        b.odd_size_ht_ft ?? null,
+        odd_size_pricing,
       ];
 
       await conn.query(
         `INSERT INTO contracts (${parentCols.join(",")})
-       VALUES (${parentCols.map(() => "?").join(",")})`,
+         VALUES (${parentCols.map(() => "?").join(",")})`,
         parentVals
       );
 
-      // Utility bulk executor
+      // Utility bulk executor on SAME TRANSACTION/CONNECTION
       const bulk = async (sql: string, rows: any[]) => {
         if (!rows?.length) return;
         for (const r of rows) await conn.query(sql, r);
@@ -354,91 +522,135 @@ export const createContract = asyncHandler(
       // volumetric bases
       if (Array.isArray(b.volumetric_bases)) {
         const rows = b.volumetric_bases
-          .map((x: any) => nOr(x, 0))
-          .filter((x: number) => Number.isFinite(x) && x >= 0)
-          .map((x: number) => [contractId, x]);
+          .map((x: any) =>
+            typeof x === "object"
+              ? [contractId, nOr(x.cft_base, 0), sOr(x.basis_text, null)]
+              : [contractId, nOr(x, 0), null]
+          )
+          .filter((r: any[]) => Number.isFinite(r[1]) && r[1] >= 0);
         await bulk(
-          `INSERT INTO contract_volumetric_bases (id, contract_id, cft_base)
-         VALUES (UUID(), ?, ?)`,
+          `INSERT INTO contract_volumetric_bases (id, contract_id, cft_base, basis_text)
+           VALUES (UUID(), ?, ?, ?)`,
           rows
         );
       }
 
-      // parties (email-safe, role normalized)
+      // parties (email-safe, role normalized) + optional gstin/tan
       if (Array.isArray(b.parties)) {
-        const rows = b.parties
+        const hasGST = await tableHasColumn(conn, "contract_parties", "gstin");
+        const hasTAN = await tableHasColumn(conn, "contract_parties", "tan");
+
+        const fixedCols = [
+          "id",
+          "contract_id",
+          "party_role",
+          "legal_name",
+          "brand_name",
+          "cin",
+          "pan",
+          "address_line1",
+          "address_line2",
+          "city",
+          "district",
+          "state",
+          "postcode",
+          "phone",
+          "contact_person",
+          "email",
+        ];
+        const optCols: string[] = [];
+        if (hasGST) optCols.push("gstin");
+        if (hasTAN) optCols.push("tan");
+        const allCols = [...fixedCols, ...optCols];
+
+        const rowsValues = b.parties
           .map((p: any) => ({
             party_role: normalizePartyRole(p.party_role),
             legal_name: sOr(p.legal_name, "")!,
             brand_name: sOr(p.brand_name, null),
-            cin: sOr(p.cin, null),
-            pan: sOr(p.pan, null),
-            address_line1: sOr(p.address ?? p.address_line1, null),
+            cin: normCIN(p.cin),
+            pan: normPAN(p.pan),
+            gstin: normGST(p.gstin),
+            tan: normTAN(p.tan),
+            address_line1: sOr(p.address_line1 ?? p.address, null),
             address_line2: sOr(p.address_line2, null),
             city: sOr(p.city, null),
             district: sOr(p.district, null),
             state: sOr(p.state, null),
             postcode: sOr(p.postcode, null),
             phone: sOr(p.phone, null),
-            contact_person: sOr(p.contact_name ?? p.contact_person, null),
+            contact_person: sOr(p.contact_person ?? p.contact_name, null),
             email: sOr(p.email, null),
           }))
           .filter((p: any) => p.legal_name.length > 0)
-          .map((p: any) => [
-            contractId,
-            p.party_role,
-            p.legal_name,
-            p.brand_name,
-            p.cin,
-            p.pan,
-            p.address_line1,
-            p.address_line2,
-            p.city,
-            p.district,
-            p.state,
-            p.postcode,
-            p.phone,
-            p.contact_person,
-            p.email,
-          ]);
+          .map((p: any) => {
+            const fixedVals = [
+              /* contract_id */ contractId,
+              /* party_role */ p.party_role,
+              /* legal_name */ p.legal_name,
+              /* brand_name */ p.brand_name,
+              /* cin */ p.cin,
+              /* pan */ p.pan,
+              /* address_line1 */ p.address_line1,
+              /* address_line2 */ p.address_line2,
+              /* city */ p.city,
+              /* district */ p.district,
+              /* state */ p.state,
+              /* postcode */ p.postcode,
+              /* phone */ p.phone,
+              /* contact_person */ p.contact_person,
+              /* email */ p.email,
+            ];
+            const optVals: any[] = [];
+            if (hasGST) optVals.push(p.gstin ?? null);
+            if (hasTAN) optVals.push(p.tan ?? null);
+            return [...fixedVals, ...optVals];
+          });
 
-        await bulk(
-          `INSERT INTO contract_parties
-         (id, contract_id, party_role, legal_name, brand_name, cin, pan,
-          address_line1, address_line2, city, district, state, postcode,
-          phone, contact_person, email)
-         VALUES (UUID(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          rows
-        );
+        if (rowsValues.length) {
+          const placeholdersOneRow = `(UUID(), ${allCols
+            .slice(1)
+            .map(() => "?")
+            .join(", ")})`;
+          await conn.query(
+            `INSERT INTO contract_parties (${allCols.join(",")})
+             VALUES ${rowsValues.map(() => placeholdersOneRow).join(",")}`,
+            rowsValues.flat()
+          );
+        }
       }
 
-      // ODA
+      // ODA (basic — legacy)
       if (Array.isArray(b.oda_rules)) {
         const rows = b.oda_rules
           .map((o: any) => ({
             oda_code: sOr(o.oda_code ?? o.pincode_prefix, "")!,
+            oda_label: sOr(o.oda_label, null),
             rate_per_kg: nOr(o.rate_per_kg ?? o.surcharge_pct, 0),
             min_per_cn: nOr(o.min_per_cn ?? o.surcharge_flat, 0),
+            max_per_cn: o.max_per_cn != null ? nOr(o.max_per_cn, 0) : null,
             notes: sOr(o.notes, null),
           }))
           .filter((o: any) => o.oda_code.length > 0)
           .map((o: any) => [
             contractId,
             o.oda_code,
+            o.oda_label,
             o.rate_per_kg,
             o.min_per_cn,
+            o.max_per_cn,
             o.notes,
           ]);
 
         await bulk(
           `INSERT INTO contract_oda_charges
-         (id, contract_id, oda_code, rate_per_kg, min_per_cn, notes)
-         VALUES (UUID(), ?, ?, ?, ?, ?)`,
+           (id, contract_id, oda_code, oda_label, rate_per_kg, min_per_cn, max_per_cn, notes)
+           VALUES (UUID(), ?, ?, ?, ?, ?, ?, ?)`,
           rows
         );
       }
 
-      // Non-metro — guarantee NOT NULL
+      // Non-metro
       if (Array.isArray(b.non_metro_rules)) {
         const rows = b.non_metro_rules.map((n: any) => [
           contractId,
@@ -447,8 +659,8 @@ export const createContract = asyncHandler(
         ]);
         await bulk(
           `INSERT INTO contract_non_metro_rules
-         (id, contract_id, distance_km_max, rate_per_kg)
-         VALUES (UUID(), ?, ?, ?)`,
+           (id, contract_id, distance_km_max, rate_per_kg)
+           VALUES (UUID(), ?, ?, ?)`,
           rows
         );
       }
@@ -476,13 +688,13 @@ export const createContract = asyncHandler(
 
         await bulk(
           `INSERT INTO contract_region_surcharges
-         (id, contract_id, region_name, base_relative_to, addl_rate_per_kg, notes)
-         VALUES (UUID(), ?, ?, ?, ?, ?)`,
+           (id, contract_id, region_name, base_relative_to, addl_rate_per_kg, notes)
+           VALUES (UUID(), ?, ?, ?, ?, ?)`,
           rows
         );
       }
 
-      // ---------- INSURANCE (auto-detect ENUM and coerce) ----------
+      // Insurance (ENUM auto-detect)
       let insuranceEnumAllowed: string[] = [];
       try {
         insuranceEnumAllowed = await getEnumAllowedValues(
@@ -509,8 +721,8 @@ export const createContract = asyncHandler(
 
         await bulk(
           `INSERT INTO contract_insurance_rules
-         (id, contract_id, insurance_type, pct_of_invoice, min_per_cn, liability_desc)
-         VALUES (UUID(), ?, ?, ?, ?, ?)`,
+           (id, contract_id, insurance_type, pct_of_invoice, min_per_cn, liability_desc)
+           VALUES (UUID(), ?, ?, ?, ?, ?)`,
           rows
         );
       }
@@ -527,8 +739,8 @@ export const createContract = asyncHandler(
 
         await bulk(
           `INSERT INTO contract_incentive_slabs
-         (id, contract_id, tonnage_min, tonnage_max, discount_pct)
-         VALUES (UUID(), ?, ?, ?, ?)`,
+           (id, contract_id, tonnage_min, tonnage_max, discount_pct)
+           VALUES (UUID(), ?, ?, ?, ?)`,
           rows
         );
       }
@@ -544,10 +756,116 @@ export const createContract = asyncHandler(
 
         await bulk(
           `INSERT INTO contract_annexures
-         (id, contract_id, annexure_code, title, raw_text)
-         VALUES (UUID(), ?, ?, ?, ?)`,
+           (id, contract_id, annexure_code, title, raw_text)
+           VALUES (UUID(), ?, ?, ?, ?)`,
           rows
         );
+      }
+
+      // NEW: Metro congestion cities
+      if (Array.isArray(b.metro_congestion_cities)) {
+        const rows = b.metro_congestion_cities
+          .filter((m: any) => String(m.city || "").trim().length)
+          .map((m: any) => [
+            contractId,
+            String(m.city).trim(),
+            nOr(m.charge_per_cn, 0),
+            sOr(m.notes, null),
+          ]);
+        await bulk(
+          `INSERT INTO contract_metro_congestion_cities (id, contract_id, city, charge_per_cn, notes)
+           VALUES (UUID(), ?, ?, ?, ?)`,
+          rows
+        );
+      }
+
+      // NEW: Special handling ranges
+      if (Array.isArray(b.special_handling)) {
+        const rows = b.special_handling.map((r: any) => [
+          contractId,
+          nOr(r.range_min_kg, 0),
+          r.range_max_kg != null ? nOr(r.range_max_kg, 0) : null,
+          nOr(r.rate_per_kg, 0),
+        ]);
+        await bulk(
+          `INSERT INTO contract_special_handling_charges (id, contract_id, range_min_kg, range_max_kg, rate_per_kg)
+           VALUES (UUID(), ?, ?, ?, ?)`,
+          rows
+        );
+      }
+
+      // NEW: Pickup charges
+      if (Array.isArray(b.pickup_charges)) {
+        const rows = b.pickup_charges
+          .filter((p: any) => sOr(p.service_code, null))
+          .map((p: any) => [
+            contractId,
+            sOr(p.service_code)!,
+            p.rate_per_kg != null ? nOr(p.rate_per_kg, 0) : null,
+            p.min_per_pickup != null ? nOr(p.min_per_pickup, 0) : null,
+            sOr(p.notes, null),
+          ]);
+        await bulk(
+          `INSERT INTO contract_pickup_charges (id, contract_id, service_code, rate_per_kg, min_per_pickup, notes)
+           VALUES (UUID(), ?, ?, ?, ?, ?)`,
+          rows
+        );
+      }
+
+      // NEW: Zone rates (auto-detect zone column name & optional columns)
+      if (Array.isArray(b.zone_rates)) {
+        const cols = await getTableColumns(conn, "contract_zone_rates");
+        const zoneCol = cols.has("zone_name")
+          ? "zone_name"
+          : cols.has("zone")
+          ? "zone"
+          : cols.has("zone_code")
+          ? "zone_code"
+          : null;
+
+        if (!zoneCol) {
+          console.warn(
+            "[contracts] Skipping contract_zone_rates: no zone column (zone_name/zone/zone_code) found."
+          );
+        } else {
+          const baseCols = ["id", "contract_id", zoneCol];
+          const optCols: string[] = [];
+          if (cols.has("rate_per_kg")) optCols.push("rate_per_kg");
+          if (cols.has("tat_days")) optCols.push("tat_days");
+          if (cols.has("min_cn_rs")) optCols.push("min_cn_rs");
+          if (cols.has("coverage_areas")) optCols.push("coverage_areas");
+
+          const allCols = [...baseCols, ...optCols];
+
+          const rows = b.zone_rates
+            .filter((z: any) => sOr(z.zone_name ?? z.zone ?? z.zone_code, null))
+            .map((z: any) => {
+              const values: any[] = [
+                /* contract_id */ contractId,
+                /* zone */ sOr(z.zone_name ?? z.zone ?? z.zone_code)!,
+              ];
+              if (optCols.includes("rate_per_kg"))
+                values.push(nOr(z.rate_per_kg, 0));
+              if (optCols.includes("tat_days")) values.push(nOr(z.tat_days, 0));
+              if (optCols.includes("min_cn_rs"))
+                values.push(nOr(z.min_cn_rs, 0));
+              if (optCols.includes("coverage_areas"))
+                values.push(sOr(z.coverage_areas, null));
+              return values;
+            });
+
+          if (rows.length) {
+            const placeholdersOneRow = `(UUID(), ?, ${allCols
+              .slice(2)
+              .map(() => "?")
+              .join(", ")})`;
+            await conn.query(
+              `INSERT INTO contract_zone_rates (${allCols.join(",")})
+               VALUES ${rows.map(() => placeholdersOneRow).join(",")}`,
+              rows.flat()
+            );
+          }
+        }
       }
 
       await conn.commit();
@@ -557,18 +875,7 @@ export const createContract = asyncHandler(
       let pdfUrl: string | null = null;
       try {
         const vm = await loadContractVM(contractId);
-        const html = renderContractHTML({
-          contract: vm.contract,
-          client: vm.client,
-          parties: vm.parties,
-          vas: vm.vas,
-          oda: vm.oda,
-          region: vm.region,
-          insurance: vm.insurance,
-          incentives: vm.incentives,
-          rateMatrix: vm.rateMatrix,
-          volumetric_bases: vm.volumetric_bases, // <— pass if your template needs it
-        } as any);
+        const html = renderContractHTML(vm as any);
 
         const pdfBuffer = await htmlToPdfBuffer(html);
         const blobKey = `contracts/${contractId}.pdf`;
@@ -581,7 +888,7 @@ export const createContract = asyncHandler(
         // Store doc row regardless (keep metadata)
         await pool.query(
           `INSERT INTO documents (id, client_id, doc_type, url, meta_json)
-     VALUES (UUID(), ?, 'CONTRACT_PDF', ?, JSON_OBJECT('contract_id', ?, 'contract_code', ?, 'source', ?))`,
+           VALUES (UUID(), ?, 'CONTRACT_PDF', ?, JSON_OBJECT('contract_id', ?, 'contract_code', ?, 'source', ?))`,
           [
             vm.contract.client_id,
             pdfUrl,
@@ -602,19 +909,19 @@ export const createContract = asyncHandler(
             to: recipient.to,
             subject: `Contract ${vm.contract.contract_code} – Rapidero Logistics`,
             html: `
-        <div style="font-family:Arial,Helvetica,sans-serif">
-          <p>Dear ${recipient.name || "Client"},</p>
-          <p>Your service agreement <b>${
-            vm.contract.contract_code
-          }</b> is ready.</p>
-          ${htmlLink}
-          <p>Regards,<br/>Rapidero Logistics</p>
-        </div>
-      `,
+              <div style="font-family:Arial,Helvetica,sans-serif">
+                <p>Dear ${recipient.name || "Client"},</p>
+                <p>Your service agreement <b>${
+                  vm.contract.contract_code
+                }</b> is ready.</p>
+                ${htmlLink}
+                <p>Regards,<br/>Rapidero Logistics</p>
+              </div>
+            `,
             text: `Contract ${vm.contract.contract_code}${
               pdfUrl ? ` link: ${pdfUrl}` : ""
             }`,
-            // @ts-ignore Nodemailer typings vary; this is fine.
+            // @ts-ignore
             attachments: [
               {
                 filename: `${vm.contract.contract_code}.pdf`,
@@ -635,9 +942,11 @@ export const createContract = asyncHandler(
         console.warn("Contract side-effects failed:", (e as any)?.message);
       }
 
-      res.json({ id: contractId, pdf_url: pdfUrl });
+      res.status(201).json({ ok: true, id: contractId, pdf_url: pdfUrl });
     } catch (err) {
-      await conn.rollback();
+      try {
+        await conn.rollback();
+      } catch {}
       conn.release();
       throw err;
     }
@@ -652,28 +961,29 @@ export const listMyContracts = asyncHandler(
 
     const [rows]: any = await pool.query(
       `SELECT c.id,
-            c.contract_code,
-            c.agreement_date,
-            c.term_start,
-            c.term_end,
-            JSON_UNQUOTE(JSON_EXTRACT(d.meta_json, '$.contract_id')) AS doc_contract_id,
-            d.url AS pdf_url,
-            d.created_at AS pdf_created_at
-       FROM contracts c
-  LEFT JOIN documents d
-         ON d.client_id = c.client_id
-        AND d.doc_type = 'CONTRACT_PDF'
-        AND JSON_UNQUOTE(JSON_EXTRACT(d.meta_json, '$.contract_id')) = c.id
-      WHERE c.client_id = ?
-   ORDER BY c.created_at DESC
-      LIMIT 200`,
+              c.contract_code,
+              c.agreement_date,
+              c.term_start,
+              c.term_end,
+              JSON_UNQUOTE(JSON_EXTRACT(d.meta_json, '$.contract_id')) AS doc_contract_id,
+              d.url AS pdf_url,
+              d.created_at AS pdf_created_at
+         FROM contracts c
+    LEFT JOIN documents d
+           ON d.client_id = c.client_id
+          AND d.doc_type = 'CONTRACT_PDF'
+          AND JSON_UNQUOTE(JSON_EXTRACT(d.meta_json, '$.contract_id')) = c.id
+        WHERE c.client_id = ?
+     ORDER BY c.created_at DESC
+        LIMIT 200`,
       [clientId]
     );
 
     res.json(rows);
   }
 );
-// Add in contracts.controller.ts
+
+/* --------------------------- NEW: Resend/Regenerate ------------------------ */
 export const resendContractPdf = asyncHandler(
   async (req: Request, res: Response) => {
     const { id } = req.params;
@@ -689,18 +999,7 @@ export const resendContractPdf = asyncHandler(
     }
 
     const vm = await loadContractVM(id);
-    const html = renderContractHTML({
-      contract: vm.contract,
-      client: vm.client,
-      parties: vm.parties,
-      vas: vm.vas,
-      oda: vm.oda,
-      region: vm.region,
-      insurance: vm.insurance,
-      incentives: vm.incentives,
-      rateMatrix: vm.rateMatrix,
-      volumetric_bases: vm.volumetric_bases,
-    } as any);
+    const html = renderContractHTML(vm as any);
     const pdfBuffer = await htmlToPdfBuffer(html);
 
     // Re-upload (overwrites same key)
