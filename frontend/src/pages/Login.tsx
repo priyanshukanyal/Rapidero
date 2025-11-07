@@ -3,26 +3,28 @@ import { useNavigate } from "react-router-dom";
 import { useAuth, roleHome } from "../store/auth";
 
 export default function Login() {
-  const { login, loading, error, hydrate, user } = useAuth();
+  const { login, loading, error, user } = useAuth();
   const nav = useNavigate();
-  const [email, setEmail] = useState("admin@demo.com"); // change to your real admin/client if needed
-  const [password, setPassword] = useState("Passw0rd!");
+  const [email, setEmail] = useState("admin@demo.com"); // remove in prod
+  const [password, setPassword] = useState("Passw0rd!"); // remove in prod
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     try {
-      const home = await login(email, password); // your hook returns a home path
-      hydrate();
-      // It's OK to navigate here after the async login call completes
-      nav(home);
-    } catch {}
+      // Do NOT navigate here; let the effect below handle redirects
+      await login(email, password);
+    } catch {
+      // no-op; error is already set in the store
+    }
   };
 
-  // ✅ Redirect AFTER user state changes (avoid navigating during render)
+  // Single source of truth for redirects:
+  // - if user already logged in and lands on /login, redirect
+  // - after successful login (user changes), redirect
   useEffect(() => {
     if (!user) return;
     const home = roleHome(user.roles);
-    nav(home);
+    nav(home, { replace: true });
   }, [user, nav]);
 
   return (
@@ -50,6 +52,7 @@ export default function Login() {
         </div>
         {error && <div className="text-red-600 text-sm">{error}</div>}
         <button
+          type="submit"
           disabled={loading}
           className="w-full bg-brand text-white py-2 rounded-md"
         >

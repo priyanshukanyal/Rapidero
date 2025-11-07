@@ -18,7 +18,7 @@ type AuthState = {
   error: string | null;
   login: (email: string, password: string) => Promise<PortalHome>;
   logout: () => void;
-  hydrate: () => void; // no-op now
+  hydrate: () => void;
 };
 
 const bootUser = (() => {
@@ -49,11 +49,12 @@ export const useAuth = create<AuthState>((set) => ({
       localStorage.setItem("user", JSON.stringify(data.user));
       set({ token: data.token, user: data.user, loading: false });
       return roleHome(data.user.roles);
-    } catch (e: any) {
-      set({
-        loading: false,
-        error: e?.response?.data?.error || "Login failed",
-      });
+    } catch (e: unknown) {
+      const msg =
+        (e as any)?.response?.data?.error ||
+        (e as Error)?.message ||
+        "Login failed";
+      set({ loading: false, error: msg });
       throw e;
     }
   },

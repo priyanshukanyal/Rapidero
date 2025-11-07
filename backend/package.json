@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
+    "postbuild": "copyfiles -u 1 src/public/** public",
     "start": "node dist/server.js"
   },
   "ts-node": {
@@ -37,6 +38,7 @@
     "@types/morgan": "^1.9.10",
     "@types/node": "^24.7.2",
     "@types/nodemailer": "^7.0.2",
+    "copyfiles": "^2.4.1",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "tsx": "^4.20.6",
