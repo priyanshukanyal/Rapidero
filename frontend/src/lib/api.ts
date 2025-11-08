@@ -1,5 +1,11 @@
 import axios from "axios";
 
+/**
+ * Normalize an origin string:
+ *  - Trims spaces
+ *  - Removes trailing slashes
+ *  - Adds https:// if missing
+ */
 function normalizeOrigin(raw?: string): string | "" {
   const s = (raw || "").trim();
   if (!s) return "";
@@ -16,25 +22,30 @@ function normalizeOrigin(raw?: string): string | "" {
   return "";
 }
 
-const RAW = (import.meta.env.VITE_API_BASE_URL as string | undefined) || "";
-const ORIGIN = normalizeOrigin(RAW);
+// Read from Vite environment
+const RAW = import.meta.env.VITE_API_BASE_URL || "";
 
-// Final base URL
-// - If ORIGIN provided → `${ORIGIN}/api/v1`
-// - Else use relative `/api/v1` (best for same-origin deployment)
-const BASE_URL = ORIGIN ? `${ORIGIN}/api/v1` : "/api/v1";
+// ✅ If env var is empty, use current domain (same-origin fallback)
+// const ORIGIN = RAW ? normalizeOrigin(RAW) : window.location.origin;
+const ORIGIN = "rapidero123.mysql.database.azure.com";
 
+// ✅ Always append /api/v1 (your backend prefix)
+const BASE_URL = `${ORIGIN}/api/v1`;
+
+// Create Axios instance
 const api = axios.create({
   baseURL: BASE_URL,
   headers: { "Content-Type": "application/json" },
 });
 
+// ✅ Attach JWT token if available
 api.interceptors.request.use((cfg) => {
   const token = localStorage.getItem("token");
   if (token) cfg.headers.Authorization = `Bearer ${token}`;
   return cfg;
 });
 
+// ✅ Auto-logout on 401
 api.interceptors.response.use(
   (res) => res,
   (err) => {
@@ -50,4 +61,3 @@ api.interceptors.response.use(
 );
 
 export default api;
-//$2b$10$UAC5UgJu4iro4MMlQGXipOkcKbtWQPdt5Ra05LNrND0u/2VoHnKx6

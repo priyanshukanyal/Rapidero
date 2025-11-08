@@ -15,6 +15,7 @@ import rivigoRoutes from "./routes/rivigo.js";
 
 const app = express();
 
+app.use(cors());
 /* ---------- Config ---------- */
 const API_PREFIX = env.API_PREFIX || "/api/v1";
 
@@ -27,15 +28,15 @@ const corsOrigins = (env.CORS_ORIGIN || "http://localhost:5173")
   .map((s: string) => s.trim())
   .filter(Boolean);
 
-app.use(
-  cors({
-    origin: corsOrigins,
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    maxAge: 86400, // cache preflight for a day
-  })
-);
+// app.use(
+//   cors({
+//     origin: corsOrigins,
+//     credentials: true,
+//     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+//     allowedHeaders: ["Content-Type", "Authorization"],
+//     maxAge: 86400, // cache preflight for a day
+//   })
+// );
 
 /* Body + logs */
 app.use(express.json({ limit: "2mb" }));

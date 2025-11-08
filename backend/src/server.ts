@@ -40,14 +40,12 @@ import { env } from "./config/env.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import express from "express";
-
 // Resolve __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Recommended behind IIS/ARR
 app.set("trust proxy", 1);
-
 // Serve static files if traffic reaches Node (IIS also serves /public directly)
 app.use(
   express.static(path.resolve(__dirname, "../public"), {

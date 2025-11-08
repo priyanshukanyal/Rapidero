@@ -201,6 +201,8 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     "SELECT id, password_hash, name, email, is_active FROM users WHERE email=? LIMIT 1",
     [email]
   );
+
+  console.log("user:", u);
   if (!u || !u.is_active)
     return res.status(401).json({ error: "Invalid credentials" });
 
