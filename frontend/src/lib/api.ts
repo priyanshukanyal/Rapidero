@@ -27,7 +27,7 @@ const RAW = import.meta.env.VITE_API_BASE_URL || "";
 
 // ✅ If env var is empty, use current domain (same-origin fallback)
 // const ORIGIN = RAW ? normalizeOrigin(RAW) : window.location.origin;
-const ORIGIN = "rapidero123.mysql.database.azure.com";
+const ORIGIN = "rapidero-aza7f8a6gnewfgfx.centralindia-01.azurewebsites.net";
 
 // ✅ Always append /api/v1 (your backend prefix)
 const BASE_URL = `${ORIGIN}/api/v1`;

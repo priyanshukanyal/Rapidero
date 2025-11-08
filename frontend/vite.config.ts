@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: "rapidero123.mysql.database.azure.com",
+        target: "rapidero-aza7f8a6gnewfgfx.centralindia-01.azurewebsites.net",
         changeOrigin: true,
       },
     },
