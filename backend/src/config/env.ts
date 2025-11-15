@@ -42,6 +42,15 @@ const schema = z.object({
   SMTP_USER: z.string(),
   SMTP_PASS: z.string(),
   SMTP_FROM: z.string(), // e.g. `"Rapidero Logistics" <no-reply@rapidero.com>`
+  SMTP_ALLOW_SELF_SIGNED: z
+    .preprocess((v) => v ?? "false", z.string())
+    .transform((v) => v === "true" || v === "1")
+    .default(false),
+  // Rivigo API
+  RIVIGO_BASE_URL: z.string().url(),
+  RIVIGO_APP_UUID: z.string().uuid(),
+  RIVIGO_AUTH_BASIC: z.string(),
+  RIVIGO_CLIENT_CODE: z.string(),
 });
 
 export const env = schema.parse(process.env);

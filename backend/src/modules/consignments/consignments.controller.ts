@@ -2,25 +2,35 @@ import type { Request, Response } from "express";
 import { pool } from "../../db/mysql.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 
-/** -------------------- helpers -------------------- */
+/* -------------------------------------------------------------------------- */
+/*                                   Helpers                                  */
+/* -------------------------------------------------------------------------- */
+
 const asNum = (v: any, d = 0) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
 };
+
 const toCode = (v: string | undefined, allowed: string[], def?: string) => {
   const s = (v ?? def ?? "").toUpperCase().trim();
   if (!s) return null;
-  if (!allowed.includes(s)) throw new Error(`Invalid code: ${v}`);
+  if (!allowed.includes(s)) {
+    throw new Error(`Invalid code: ${v}`);
+  }
   return s;
 };
+
 const isAdminOrOps = (req: Request) => {
   const roles: string[] = (req as any).user?.roles || [];
   return roles.includes("ADMIN") || roles.includes("OPS");
 };
+
 const tokenClientId = (req: Request): string | null =>
   (req as any).user?.client_id ?? null;
 
-/** -------------------- UI: create CN from portal -------------------- */
+/* -------------------------------------------------------------------------- */
+/*                        UI: create CN from portal (POST)                    */
+/* -------------------------------------------------------------------------- */
 // POST /api/v1/consignments/ui
 export const createCnFromUI = asyncHandler(
   async (req: Request, res: Response) => {
@@ -40,6 +50,7 @@ export const createCnFromUI = asyncHandler(
       0
     );
 
+    // For now, local CN number. Later you can replace this with Rivigo CN if needed.
     const cnNumber = body.cnNumber || `CN${Date.now()}`;
 
     const packingType = toCode(f.packingType, [
@@ -62,29 +73,31 @@ export const createCnFromUI = asyncHandler(
     try {
       await conn.beginTransaction();
 
+      // Main consignment row
       await conn.query(
         `INSERT INTO consignments
-       (id, cn_number, client_id, client_name_snapshot, billing_entity_name, client_shipment_code,
-        contract_id, provider_awb, carrier_name, ewaybill_no, reference_no,
-        booking_datetime, package_count, content, packing_type_code, charge_basis_code, conversion_factor,
-        shipper_name, shipper_phone, shipper_email, shipper_company, shipper_gstin, shipper_pan,
-        shipper_address, shipper_city, shipper_state, shipper_postcode,
-        consignee_name, consignee_phone, consignee_email, consignee_company, consignee_gstin, consignee_pan,
-        consignee_address, consignee_city, consignee_state, consignee_postcode,
-        actual_weight_kg, delivery_type_code, service_category_code,
-        vas_fragile, vas_liquid_handling, vas_pickup_floor, vas_pickup_floor_no, vas_delivery_floor, vas_delivery_floor_no,
-        invoices_total_value_rs, total_volume_cm3, raw_request_json)
-       VALUES
-       (UUID(), ?, ?, ?, ?, ?,
-        NULL, NULL, NULL, NULL, NULL,
-        ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?,
-        ?, ?, NULL, ?,
-        ?, ?, ?, ?, ?, ?,
-        ?, ?, NULL, ?,
-        ?, ?, ?,
-        ?, ?, ?, ?, ?, ?,
-        ?, ?, ?)`,
+         (id, cn_number, client_id, client_name_snapshot, billing_entity_name, client_shipment_code,
+          contract_id, provider_awb, carrier_name, ewaybill_no, reference_no,
+          booking_datetime, package_count, content, packing_type_code, charge_basis_code, conversion_factor,
+          shipper_name, shipper_phone, shipper_email, shipper_company, shipper_gstin, shipper_pan,
+          shipper_address, shipper_city, shipper_state, shipper_postcode,
+          consignee_name, consignee_phone, consignee_email, consignee_company, consignee_gstin, consignee_pan,
+          consignee_address, consignee_city, consignee_state, consignee_postcode,
+          actual_weight_kg, delivery_type_code, service_category_code,
+          vas_fragile, vas_liquid_handling, vas_pickup_floor, vas_pickup_floor_no, vas_delivery_floor, vas_delivery_floor_no,
+          invoices_total_value_rs, total_volume_cm3, raw_request_json)
+         VALUES
+         (UUID(), ?, ?, ?, ?, ?,
+          NULL, NULL, NULL, NULL, NULL,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, NULL, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, NULL, ?,
+          ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?)
+        `,
         [
           cnNumber,
           body.clientId || null,
@@ -135,17 +148,20 @@ export const createCnFromUI = asyncHandler(
         ]
       );
 
+      // Get the consignment id we just inserted
       const [[cn]]: any = await conn.query(
         `SELECT id FROM consignments WHERE cn_number=? LIMIT 1`,
         [cnNumber]
       );
       const consignmentId = cn.id;
 
+      // Invoices
       for (const inv of invoices) {
         await conn.query(
           `INSERT INTO consignment_invoices
-         (id, consignment_id, invoice_number, amount_rs, ewaybill_number, hsn_code, hsn_amount_rs, images_json)
-         VALUES (UUID(), ?, ?, ?, ?, ?, ?, NULL)`,
+           (id, consignment_id, invoice_number, amount_rs, ewaybill_number, hsn_code, hsn_amount_rs, images_json)
+           VALUES (UUID(), ?, ?, ?, ?, ?, ?, NULL)
+          `,
           [
             consignmentId,
             inv.invoiceNumber,
@@ -157,13 +173,15 @@ export const createCnFromUI = asyncHandler(
         );
       }
 
+      // Packages
       for (const p of packages) {
         const lineVol =
           asNum(p.length) * asNum(p.breadth) * asNum(p.height) * asNum(p.count);
         await conn.query(
           `INSERT INTO consignment_packages
-         (id, consignment_id, length_cm, breadth_cm, height_cm, pkg_count, line_volume_cm3)
-         VALUES (UUID(), ?, ?, ?, ?, ?, ?)`,
+           (id, consignment_id, length_cm, breadth_cm, height_cm, pkg_count, line_volume_cm3)
+           VALUES (UUID(), ?, ?, ?, ?, ?, ?)
+          `,
           [
             consignmentId,
             asNum(p.length),
@@ -175,17 +193,22 @@ export const createCnFromUI = asyncHandler(
         );
       }
 
-      // Initial status
+      // Initial status history
       await conn.query(
-        `INSERT INTO consignment_status_history (id, consignment_id, status_code, remarks)
-       VALUES (UUID(), ?, 'CREATED', 'CN created via UI')`,
+        `INSERT INTO consignment_status_history
+           (id, consignment_id, status_code, remarks)
+         VALUES (UUID(), ?, 'CREATED', 'CN created via UI')
+        `,
         [consignmentId]
       );
 
       await conn.commit();
-      res
-        .status(201)
-        .json({ ok: true, id: consignmentId, cn_number: cnNumber });
+
+      res.status(201).json({
+        ok: true,
+        id: consignmentId,
+        cn_number: cnNumber,
+      });
     } catch (e) {
       await conn.rollback();
       throw e;
@@ -195,7 +218,9 @@ export const createCnFromUI = asyncHandler(
   }
 );
 
-/** -------------------- UI: fetch by CN number -------------------- */
+/* -------------------------------------------------------------------------- */
+/*                    UI: fetch CN + details by CN number                     */
+/* -------------------------------------------------------------------------- */
 // GET /api/v1/consignments/ui/:cnNumber
 export const getCnWithDetails = asyncHandler(
   async (req: Request, res: Response) => {
@@ -209,41 +234,54 @@ export const getCnWithDetails = asyncHandler(
 
     const [invoices]: any = await pool.query(
       `SELECT id, invoice_number, amount_rs, ewaybill_number, hsn_code, hsn_amount_rs
-       FROM consignment_invoices WHERE consignment_id=?`,
+         FROM consignment_invoices
+        WHERE consignment_id=?
+      `,
       [cn.id]
     );
+
     const [packages]: any = await pool.query(
       `SELECT id, length_cm, breadth_cm, height_cm, pkg_count, line_volume_cm3
-       FROM consignment_packages WHERE consignment_id=?`,
+         FROM consignment_packages
+        WHERE consignment_id=?
+      `,
       [cn.id]
     );
+
     const [history]: any = await pool.query(
       `SELECT status_code, location_text, remarks, actor_user_id, event_time
-       FROM consignment_status_history
-       WHERE consignment_id=?
-       ORDER BY event_time ASC`,
+         FROM consignment_status_history
+        WHERE consignment_id=?
+        ORDER BY event_time ASC
+      `,
       [cn.id]
     );
 
     try {
-      if (cn.raw_request_json)
+      if (cn.raw_request_json) {
         cn.raw_request_json = JSON.parse(cn.raw_request_json);
-    } catch {}
+      }
+    } catch {
+      // ignore parse errors
+    }
 
     res.json({ ...cn, invoices, packages, history });
   }
 );
 
-/** -------------------- Core: list/detail/tracking -------------------- */
+/* -------------------------------------------------------------------------- */
+/*                  Core: list consignments (for table view)                  */
+/* -------------------------------------------------------------------------- */
 // GET /api/v1/consignments
 export const listConsignments = asyncHandler(
   async (req: Request, res: Response) => {
     const params: any[] = [];
     let where = " WHERE 1=1 ";
 
+    // Multi-tenant: non-admin can only see their own client_id
     if (!isAdminOrOps(req)) {
       const cid = tokenClientId(req);
-      if (!cid) return res.json([]); // no tenant
+      if (!cid) return res.json([]); // no tenant → no data
       where += " AND client_id = ? ";
       params.push(cid);
     }
@@ -256,18 +294,27 @@ export const listConsignments = asyncHandler(
     }
 
     const [rows] = await pool.query(
-      `SELECT id, cn_number, current_status_code, booking_datetime,
-            shipper_city, consignee_city, actual_weight_kg
-       FROM consignments
-      ${where}
-      ORDER BY created_at DESC
-      LIMIT 200`,
+      `SELECT id,
+              cn_number,
+              current_status_code,
+              booking_datetime,
+              shipper_city,
+              consignee_city,
+              actual_weight_kg
+         FROM consignments
+        ${where}
+        ORDER BY created_at DESC
+        LIMIT 200`,
       params
     );
+
     res.json(rows);
   }
 );
 
+/* -------------------------------------------------------------------------- */
+/*                Core: get consignment by internal database id               */
+/* -------------------------------------------------------------------------- */
 // GET /api/v1/consignments/:id
 export const getConsignmentById = asyncHandler(
   async (req: Request, res: Response) => {
@@ -280,13 +327,16 @@ export const getConsignmentById = asyncHandler(
   }
 );
 
+/* -------------------------------------------------------------------------- */
+/*                      Core: get tracking history by id                      */
+/* -------------------------------------------------------------------------- */
 // GET /api/v1/consignments/:id/tracking
 export const getTracking = asyncHandler(async (req: Request, res: Response) => {
   const [rows] = await pool.query(
     `SELECT status_code, location_text, remarks, event_time
-       FROM consignment_status_history
-      WHERE consignment_id=?
-      ORDER BY event_time`,
+         FROM consignment_status_history
+        WHERE consignment_id=?
+        ORDER BY event_time`,
     [req.params.id]
   );
   res.json(rows);

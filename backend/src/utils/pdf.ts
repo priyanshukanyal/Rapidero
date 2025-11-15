@@ -1,54 +1,34 @@
 // src/utils/pdf.ts
-import puppeteer from "puppeteer";
+import pdf from "html-pdf";
 
 /**
- * Render HTML → PDF buffer reliably across local/dev/prod.
- * - handles slow fonts/CSS (waits for fonts & network idle)
- * - works in Docker/CI with no-sandbox flags
- * - longer default timeout to avoid 30s navigation timeouts
+ * Render HTML → PDF buffer using `html-pdf`.
+ * No Chrome / Puppeteer needed, works well on servers.
  */
-export async function htmlToPdfBuffer(
+export function htmlToPdfBuffer(
   html: string,
-  opts?: { format?: string }
+  _opts?: { format?: string }
 ): Promise<Buffer> {
-  // Use stable "headless: true" (not "new") + flags for server environments
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--font-render-hinting=none",
-      "--disable-gpu",
-      "--no-zygote",
-    ],
-  });
+  return new Promise((resolve, reject) => {
+    const options = {
+      format: "A4",
+      border: {
+        top: "10mm",
+        right: "10mm",
+        bottom: "10mm",
+        left: "10mm",
+      },
+      // You can tweak things like orientation, timeout, etc. here if needed
+      // orientation: "portrait",
+      // timeout: 60000,
+    } as any;
 
-  try {
-    const page = await browser.newPage();
-    // Bump timeouts so large pages don’t bail out early
-    page.setDefaultNavigationTimeout(120_000);
-    page.setDefaultTimeout(120_000);
-
-    // Using data: URL avoids navigation race conditions
-    const dataUrl = "data:text/html;charset=utf-8," + encodeURIComponent(html);
-    await page.goto(dataUrl, { waitUntil: "domcontentloaded" });
-
-    // Ensure styles/metrics are ready
-    await page.evaluateHandle("document.fonts && document.fonts.ready");
-    await page.waitForNetworkIdle({ idleTime: 500, timeout: 30_000 }).catch(
-      () => {} // ignore if already idle
-    );
-
-    await page.emulateMediaType("screen");
-
-    const buf = await page.pdf({
-      format: (opts?.format as any) || "A4",
-      printBackground: true,
-      margin: { top: "20mm", right: "15mm", bottom: "20mm", left: "15mm" },
+    (pdf as any).create(html, options).toBuffer((err: any, buffer: Buffer) => {
+      if (err) {
+        console.error("htmlToPdfBuffer error:", err);
+        return reject(err);
+      }
+      resolve(buffer);
     });
-    return buf;
-  } finally {
-    await browser.close();
-  }
+  });
 }

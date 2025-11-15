@@ -26,15 +26,14 @@ import axios from "axios";
 // const RAW = import.meta.env.VITE_API_BASE_URL || "";
 
 // ✅ If env var is empty, use current domain (same-origin fallback)
-// const ORIGIN = RAW ? normalizeOrigin(RAW) : window.location.origin;
-// const ORIGIN = "rapidero-aza7f8a6gnewfgfx.centralindia-01.azurewebsites.net";
+const ORIGIN = window.location.origin?.includes("localhost:5173") ? "http://localhost:4000" : "https://rapidero-1-bmf8a6dse7fxascu.centralindia-01.azurewebsites.net";
 
 // ✅ Always append /api/v1 (your backend prefix)
-// const BASE_URL = `${ORIGIN}/api/v1`;
+const BASE_URL = `${ORIGIN}/api/v1`;
 
 // Create Axios instance
 const api = axios.create({
-  // baseURL: BASE_URL,
+  baseURL: BASE_URL,
   headers: { "Content-Type": "application/json" },
 });
 

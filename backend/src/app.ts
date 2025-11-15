@@ -3,7 +3,12 @@ import cors from "cors";
 import morgan from "morgan";
 import path from "node:path";
 
-import { notFound, errorHandler } from "./middleware/errorHandlers.js";
+import { fileURLToPath } from "url";
+// Resolve __dirname in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+
 import { env } from "./config/env.js";
 
 import userRoutes from "./modules/users/users.routes.js";
@@ -19,28 +24,13 @@ app.use(cors());
 /* ---------- Config ---------- */
 const API_PREFIX = env.API_PREFIX || "/api/v1";
 
-/* CORS: comma-separated env works for Azure App Settings too.
-   IMPORTANT: CORS_ORIGIN must be bare origins (no paths), e.g.
-   https://<app>.azurewebsites.net,http://localhost:5173
-*/
-const corsOrigins = (env.CORS_ORIGIN || "http://localhost:5173")
-  .split(",")
-  .map((s: string) => s.trim())
-  .filter(Boolean);
-
-// app.use(
-//   cors({
-//     origin: corsOrigins,
-//     credentials: true,
-//     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-//     allowedHeaders: ["Content-Type", "Authorization"],
-//     maxAge: 86400, // cache preflight for a day
-//   })
-// );
 
 /* Body + logs */
 app.use(express.json({ limit: "2mb" }));
 app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
+
+// Serve static files if traffic reaches Node (IIS also serves /public directly)
+app.use(express.static(path.resolve(__dirname, "./public")));
 
 /* ---------- Health ---------- */
 app.get("/health", (_req, res) =>
@@ -52,16 +42,16 @@ app.get(`${API_PREFIX}/health`, (_req, res) => res.json({ ok: true }));
    Use path relative to compiled JS at /dist so it works on Azure.
    (wwwroot/dist/... -> resolve to ../storage)
 */
-app.use(
-  "/storage",
-  express.static(
-    path.resolve(path.dirname(new URL(import.meta.url).pathname), "../storage"),
-    {
-      fallthrough: true,
-      maxAge: "30d",
-    }
-  )
-);
+// app.use(
+//   "/storage",
+//   express.static(
+//     path.resolve(path.dirname(new URL(import.meta.url).pathname), "../storage"),
+//     {
+//       fallthrough: true,
+//       maxAge: "30d",
+//     }
+//   )
+// );
 
 /* ---------- API routes (all under API_PREFIX for consistency) ---------- */
 app.use(`${API_PREFIX}/auth`, authRoutes);
@@ -82,9 +72,5 @@ app.use((err: any, _req: any, res: any, _next: any) => {
     detail: err?.sql || undefined,
   });
 });
-
-/* 404 + final error handler */
-app.use(notFound);
-app.use(errorHandler);
 
 export default app;

@@ -29,7 +29,7 @@ async function getContainerClient() {
 
   // Ensure created; do not assume access level changes if it already exists.
   await container.createIfNotExists({
-    access: env.AZURE_BLOB_PUBLIC === "true" ? "container" : undefined,
+    access: (env as any).AZURE_BLOB_PUBLIC === "true" ? "container" : undefined,
   });
   return container;
 }
@@ -79,7 +79,7 @@ export async function uploadPdfBuffer(
     let url = blob.url;
 
     // If container is private, append a short SAS:
-    if (env.AZURE_BLOB_PUBLIC !== "true") {
+    if ((env as any).AZURE_BLOB_PUBLIC !== "true") {
       const { accountName, accountKey } = parseConnStringForAccount();
       if (accountName && accountKey) {
         const creds = new StorageSharedKeyCredential(accountName, accountKey);
