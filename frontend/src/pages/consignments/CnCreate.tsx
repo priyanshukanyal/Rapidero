@@ -20,59 +20,60 @@ type Pkg = {
 
 export default function CnCreate() {
   const [formData, setFormData] = useState<any>({
-    // PRIMARY
-    client: "",
-    billingEntity: "",
-    clientShipmentCode: "",
-    bookingDateTime: new Date().toISOString().slice(0, 16),
+    // ---------- PRIMARY ----------
+    client: "TEST COMPANY LTD",
+    billingEntity: "TEST COMPANY LTD",
+    clientShipmentCode: "PEFTEST01",
+    // 1574361000000 → 2019-11-21T18:30:00Z approx
+    bookingDateTime: "2019-11-21T18:30",
 
     noOfPackages: "1",
-    content: "",
-    packingType: "BOX",
+    content: "Clothes",
+    packingType: "BOX", // will map to packaging "CARTON" later in Rivigo body
     chargeBasis: "Weight",
     conversionFactor: "5000", // cm3/kg
     mode: "SURFACE",
-    declaredValue: "",
+    declaredValue: "500",
     codAmount: "",
 
-    // PARTNER From (Consignor)
-    consignorAddress: "",
-    consignorName: "",
-    consignorPhone: "",
-    consignorEmail: "",
-    consignorCompany: "",
-    consignorGSTIN: "",
-    consignorPAN: "",
-    consignorCity: "",
-    consignorPincode: "",
-    consignorLatitude: "",
-    consignorLongitude: "",
-    pickupFloorNumber: "",
-    originState: "",
+    // ---------- PARTNER From (Consignor) ----------
+    consignorAddress: "TEST WAREHOUSE, DELHI",
+    consignorName: "Sender Test",
+    consignorPhone: "9000000001",
+    consignorEmail: "sender@test.com",
+    consignorCompany: "TEST COMPANY LTD",
+    consignorGSTIN: "27AACCH8930K1A1",
+    consignorPAN: "ABCDE1234F",
+    consignorCity: "Delhi",
+    consignorPincode: "110021",
+    consignorLatitude: "28.5884",
+    consignorLongitude: "77.1859",
+    pickupFloorNumber: "1",
+    originState: "Delhi",
 
-    // PARTNER To (Consignee)
-    consigneeAddress: "",
-    consigneeName: "",
-    consigneePhone: "",
-    consigneeEmail: "",
-    consigneeCompany: "",
-    consigneeGSTIN: "",
-    consigneePAN: "",
-    consigneeCity: "",
-    consigneePincode: "",
-    consigneeLatitude: "",
-    consigneeLongitude: "",
-    deliveryFloorNumber: "",
-    destinationState: "",
+    // ---------- PARTNER To (Consignee) ----------
+    consigneeAddress: "TEST STREET 123, HYDERABAD",
+    consigneeName: "Receiver Test",
+    consigneePhone: "9876543210",
+    consigneeEmail: "receiver@test.com",
+    consigneeCompany: "BLUE APPARELS",
+    consigneeGSTIN: "27AACCH8930K1B2",
+    consigneePAN: "XYZAB1234X",
+    consigneeCity: "Hyderabad",
+    consigneePincode: "560001",
+    consigneeLatitude: "17.5186",
+    consigneeLongitude: "78.3963",
+    deliveryFloorNumber: "1",
+    destinationState: "Telangana",
 
-    // PACKAGE / SERVICE
-    unit: "CM", // CM | IN
-    weight: "",
+    // ---------- PACKAGE / SERVICE ----------
+    unit: "IN", // match Rivigo sample
+    weight: "0.5",
     deliveryType: "NORMAL",
     serviceCategory: "NORMAL",
-    barcodeType: "SYSTEM",
+    barcodeType: "PREPRINTED",
 
-    // VAS / flags
+    // ---------- VAS / flags ----------
     valueAddedServices: {
       fragile: false,
       liquidHandling: false,
@@ -80,45 +81,51 @@ export default function CnCreate() {
     isHazardousMaterialApplicable: false,
     isDacc: false,
 
-    // Rivigo-style extra fields (stored in raw_request_json)
-    retailType: "NORMAL", // NORMAL / B2C etc.
-    paymentMode: "PAID", // PAID / TOPAY / COD
-    taxId: "",
+    // ---------- Rivigo-style extra fields ----------
+    retailType: "NORMAL",
+    paymentMode: "PAID",
+    taxId: "ABCDE1234F",
     taxIdType: "PAN",
-    toPayAmount: "",
-    appointmentId: "",
-    appointmentTime: new Date().toISOString().slice(0, 16),
-    deliveryClient: "",
-    deliveryClientFcName: "",
-    poExpiryTime: new Date().toISOString().slice(0, 16),
-    poOrderNumber: "",
+    toPayAmount: "0",
+    appointmentId: "A001",
+    appointmentTime: "2019-11-21T18:30",
+    deliveryClient: "OTHERS",
+    deliveryClientFcName: "Test FC",
+    poExpiryTime: "2021-09-09T03:30",
+    poOrderNumber: "PO123456",
     poNumberOfItems: "1",
 
-    routeHint: "",
-    remarks: "",
+    routeHint: "DEL-HYD",
+    remarks: "Demo test booking",
 
     // identifiers
-    cnNumber: "", // optional internal CN
-    clientCode: "", // Rivigo client code (saved for later use)
+    cnNumber: "", // leave blank so Rivigo can generate cnote later
+    clientCode: "RAPID1", // from your env
   });
 
   const [invoices, setInvoices] = useState<Invoice[]>([
     {
       id: 1,
-      invoiceNumber: "",
-      amount: "",
-      ewaybillNumber: "",
-      hsnCode: "",
-      hsnAmount: "",
+      invoiceNumber: "INV001",
+      amount: "500",
+      ewaybillNumber: "123123123123",
+      hsnCode: "4901",
+      hsnAmount: "300",
     },
   ]);
 
   const [packages, setPackages] = useState<Pkg[]>([
-    { id: 1, length: "", breadth: "", height: "", count: "1" },
+    {
+      id: 1,
+      length: "10",
+      breadth: "5",
+      height: "6",
+      count: "1",
+    },
   ]);
 
-  // NEW: barcodes list (system-generated or pre-printed) – just stored in formData.raw_request_json
-  const [barcodes, setBarcodes] = useState<string[]>([""]);
+  // NEW: barcodes list (system-generated or pre-printed) – just stored in raw_request_json
+  const [barcodes, setBarcodes] = useState<string[]>(["TEST000111212"]);
 
   const addInv = () =>
     setInvoices((v) => [
@@ -230,8 +237,6 @@ export default function CnCreate() {
 
       // Attach barcodes into formData (for storing in raw_request_json)
       const payload = {
-        // If in future you have a dropdown of clients with IDs, pass clientId here:
-        // clientId: selectedClientId,
         formData: {
           ...formData,
           barcodes:
@@ -263,15 +268,6 @@ export default function CnCreate() {
       alert(
         `✅ CN created successfully.\nID: ${data?.id}\nCN Number: ${data?.cn_number}`
       );
-
-      // OPTIONAL: simple reset of some fields; tweak as you like
-      // setFormData((p: any) => ({
-      //   ...p,
-      //   clientShipmentCode: "",
-      //   cnNumber: "",
-      //   weight: "",
-      //   content: "",
-      // }));
     } catch (err: any) {
       console.error(err);
       alert(
@@ -824,7 +820,7 @@ export default function CnCreate() {
           />
         </div>
         <div>
-          <label className="block text-sm mb-1">Tax ID Type</label>
+          <label className="block text.sm mb-1">Tax ID Type</label>
           <select
             className="w-full border rounded-md px-3 py-2"
             {...bind("taxIdType")}

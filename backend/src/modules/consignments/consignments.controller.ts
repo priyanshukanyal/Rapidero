@@ -1,6 +1,14 @@
+// src/modules/consignments/consignments.controller.ts
+
 import type { Request, Response } from "express";
 import { pool } from "../../db/mysql.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
+
+// 🟢 Rivigo integration
+import {
+  createRivigoBookingFromForm,
+  type RivigoBookingResult,
+} from "../../services/rivigoClient.js";
 
 /* -------------------------------------------------------------------------- */
 /*                                   Helpers                                  */
@@ -39,6 +47,19 @@ export const createCnFromUI = asyncHandler(
     const invoices = Array.isArray(body.invoices) ? body.invoices : [];
     const packages = Array.isArray(body.packages) ? body.packages : [];
 
+    console.log(
+      "[CN:UI] Incoming create CN request body:",
+      JSON.stringify(
+        {
+          formDataKeys: Object.keys(f || {}),
+          invoicesCount: invoices.length,
+          packagesCount: packages.length,
+        },
+        null,
+        2
+      )
+    );
+
     const totalPkgs = packages.reduce(
       (t: number, p: any) => t + asNum(p.count, 0),
       0
@@ -50,7 +71,7 @@ export const createCnFromUI = asyncHandler(
       0
     );
 
-    // For now, local CN number. Later you can replace this with Rivigo CN if needed.
+    // Local CN number (internal). Abhi ke liye system ka hi CN, Rivigo CN alag se response me bhejenge
     const cnNumber = body.cnNumber || `CN${Date.now()}`;
 
     const packingType = toCode(f.packingType, [
@@ -69,6 +90,34 @@ export const createCnFromUI = asyncHandler(
       "EXPRESS",
     ]);
 
+    // 🟢 Step 1: Rivigo pe booking create karo
+    let rivigo: RivigoBookingResult | null = null;
+    try {
+      console.log("[CN:UI] Calling Rivigo booking API...");
+      rivigo = await createRivigoBookingFromForm({
+        formData: f,
+        invoices,
+        packages,
+      });
+
+      console.log("[CN:UI] Rivigo booking success:", {
+        bookingId: rivigo.bookingId,
+        cnote: rivigo.cnote,
+        cnotePrintUrl: rivigo.cnotePrintUrl,
+        clientAddressId: rivigo.clientAddressId,
+        serviceCategory: rivigo.serviceCategory,
+        boxDetailListLength: rivigo.boxDetailList?.length ?? 0,
+      });
+    } catch (err: any) {
+      console.error(
+        "[CN:UI] Rivigo booking FAILED:",
+        err?.response?.data || err.message || err
+      );
+      // Abhi ke liye error bubble karne de, taaki Postman/Frontend me clear dikhe
+      throw err;
+    }
+
+    // 🟢 Step 2: Apne MySQL DB me consignment save karo (same as before)
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -155,6 +204,36 @@ export const createCnFromUI = asyncHandler(
       );
       const consignmentId = cn.id;
 
+      console.log("[CN:UI] Inserted consignment id:", consignmentId);
+
+      // 🟢 NEW: Save Rivigo response into consignments table
+      if (rivigo) {
+        await conn.query(
+          `UPDATE consignments
+             SET rivigo_booking_id = ?,
+                 rivigo_cnote = ?,
+                 rivigo_pdf_url = ?,
+                 rivigo_client_address_id = ?,
+                 rivigo_service_category = ?,
+                 rivigo_box_details_json = ?
+           WHERE id = ?`,
+          [
+            rivigo.bookingId ?? null,
+            rivigo.cnote ?? null,
+            rivigo.cnotePrintUrl ?? null,
+            rivigo.clientAddressId ?? null,
+            rivigo.serviceCategory ?? null,
+            JSON.stringify(rivigo.boxDetailList ?? []),
+            consignmentId,
+          ]
+        );
+
+        console.log(
+          "[CN:UI] Saved Rivigo fields for consignment:",
+          consignmentId
+        );
+      }
+
       // Invoices
       for (const inv of invoices) {
         await conn.query(
@@ -204,13 +283,25 @@ export const createCnFromUI = asyncHandler(
 
       await conn.commit();
 
+      console.log("[CN:UI] CN created in DB with id:", consignmentId);
+
+      // 🟢 Final response – yaha Rivigo ke important fields bhi bhej rahe hain
       res.status(201).json({
         ok: true,
         id: consignmentId,
         cn_number: cnNumber,
+        rivigo: rivigo && {
+          bookingId: rivigo.bookingId,
+          cnote: rivigo.cnote,
+          cnotePrintUrl: rivigo.cnotePrintUrl,
+          clientAddressId: rivigo.clientAddressId ?? null,
+          serviceCategory: rivigo.serviceCategory ?? null,
+          boxDetailList: rivigo.boxDetailList ?? [],
+        },
       });
     } catch (e) {
       await conn.rollback();
+      console.error("[CN:UI] Error during CN create transaction:", e);
       throw e;
     } finally {
       conn.release();
@@ -235,16 +326,14 @@ export const getCnWithDetails = asyncHandler(
     const [invoices]: any = await pool.query(
       `SELECT id, invoice_number, amount_rs, ewaybill_number, hsn_code, hsn_amount_rs
          FROM consignment_invoices
-        WHERE consignment_id=?
-      `,
+        WHERE consignment_id=?`,
       [cn.id]
     );
 
     const [packages]: any = await pool.query(
       `SELECT id, length_cm, breadth_cm, height_cm, pkg_count, line_volume_cm3
          FROM consignment_packages
-        WHERE consignment_id=?
-      `,
+        WHERE consignment_id=?`,
       [cn.id]
     );
 
@@ -252,8 +341,7 @@ export const getCnWithDetails = asyncHandler(
       `SELECT status_code, location_text, remarks, actor_user_id, event_time
          FROM consignment_status_history
         WHERE consignment_id=?
-        ORDER BY event_time ASC
-      `,
+        ORDER BY event_time ASC`,
       [cn.id]
     );
 

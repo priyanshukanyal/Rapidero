@@ -51,6 +51,7 @@ const schema = z.object({
   RIVIGO_APP_UUID: z.string().uuid(),
   RIVIGO_AUTH_BASIC: z.string(),
   RIVIGO_CLIENT_CODE: z.string(),
+  RIVIGO_BOOKING_PATH: z.string().optional(),
 });
 
 export const env = schema.parse(process.env);
