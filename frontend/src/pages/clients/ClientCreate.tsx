@@ -1,70 +1,5 @@
-﻿// import { FormEvent, useState } from "react";
-// import api from "../../lib/api";
-// import { useNavigate } from "react-router-dom";
+﻿// src/modules/clients/ClientCreate.tsx
 
-// export default function ClientCreate() {
-//   const nav = useNavigate();
-//   const [payload, setPayload] = useState({
-//     client_name: "",
-//     email: "",
-//     phone: "",
-//     gstin: "",
-//     pan: "",
-//     website: "",
-//   });
-//   const [saving, setSaving] = useState(false);
-
-//   const onSubmit = async (e: FormEvent) => {
-//     e.preventDefault();
-//     setSaving(true);
-//     try {
-//       await api.post("/clients", payload);
-//       nav("/clients");
-//     } finally {
-//       setSaving(false);
-//     }
-//   };
-
-//   return (
-//     <form
-//       onSubmit={onSubmit}
-//       className="bg-white p-6 rounded-xl shadow max-w-2xl"
-//     >
-//       <h1 className="text-xl font-semibold mb-4">Create Client</h1>
-//       <div className="grid md:grid-cols-2 gap-4">
-//         {Object.entries(payload).map(([k, v]) => (
-//           <div key={k}>
-//             <label className="block text-sm mb-1 capitalize">
-//               {k.replace(/_/g, " ")}
-//             </label>
-//             <input
-//               className="w-full border rounded-md px-3 py-2"
-//               value={v}
-//               onChange={(e) =>
-//                 setPayload((p) => ({ ...p, [k]: e.target.value }))
-//               }
-//             />
-//           </div>
-//         ))}
-//       </div>
-//       <div className="mt-4 flex gap-2">
-//         <button
-//           disabled={saving}
-//           className="px-4 py-2 rounded-md bg-brand text-white"
-//         >
-//           {saving ? "Saving..." : "Save"}
-//         </button>
-//         <button
-//           type="button"
-//           onClick={() => nav(-1)}
-//           className="px-4 py-2 rounded-md bg-gray-100"
-//         >
-//           Cancel
-//         </button>
-//       </div>
-//     </form>
-//   );
-// }
 import { FormEvent, useState } from "react";
 import api from "../../lib/api";
 import { useNavigate } from "react-router-dom";
@@ -97,36 +32,60 @@ export default function ClientCreate() {
     setSaving(true);
     setErr(null);
     setOk(null);
+
     try {
       // 1) Create client
       const { data: created } = await api.post("/clients", payload);
-      const clientId: string | undefined = created?.id;
 
-      // 2) Optionally invite their portal user (backend will send email)
+      const clientId: string | undefined = created?.id;
+      const clientCode: string | undefined = created?.client_code;
+
+      if (!clientId) {
+        throw new Error("Client created but id missing in response");
+      }
+
+      // 2) Optionally invite their portal user (backend sends email)
       if (invite) {
         if (!portalName || !portalEmail) {
           throw new Error(
             "Portal user name & email are required when inviting"
           );
         }
+
         await api.post("/users/invite", {
           email: portalEmail,
           name: portalName,
-          password: portalPassword || undefined, // backend auto-generates if omitted
+          password: portalPassword || undefined,
           roles: ["CLIENT"],
           client_id: clientId,
         });
-        setOk("Client created and portal access email sent.");
+
+        setOk(
+          `Client ${
+            clientCode || ""
+          } created and portal access email sent.`.trim()
+        );
       } else {
-        setOk("Client created.");
+        setOk(`Client ${clientCode || ""} created.`.trim());
       }
 
-      // Navigate back to list after a short pause
       setTimeout(() => nav("/clients"), 500);
     } catch (e: any) {
-      setErr(
-        e?.response?.data?.error || e?.message || "Failed to create client"
-      );
+      // Special handling for duplicate client (409)
+      if (e?.response?.status === 409) {
+        const msg =
+          e?.response?.data?.message ||
+          e?.response?.data?.error ||
+          "Client already exists with same details";
+        // 👇 Popup
+        window.alert(msg);
+        // Show under form as well
+        setErr(msg);
+      } else {
+        setErr(
+          e?.response?.data?.error || e?.message || "Failed to create client"
+        );
+      }
     } finally {
       setSaving(false);
     }
