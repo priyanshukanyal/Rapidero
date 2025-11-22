@@ -24,6 +24,8 @@ export default function ClientDashboard() {
           setErr("You do not have client access.");
           return;
         }
+
+        // 🔒 Backend should return stats only for THIS client
         const { data } = await api.get<Dash>("/clients/me/dashboard");
         setData(data);
       } catch (e: any) {
@@ -62,6 +64,7 @@ export default function ClientDashboard() {
     </div>
   );
 }
+
 function Stat({ label, value }: { label: string; value: number }) {
   return (
     <div className="bg-white rounded-xl p-4 shadow">

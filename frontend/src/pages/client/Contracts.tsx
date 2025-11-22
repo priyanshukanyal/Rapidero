@@ -1,14 +1,23 @@
+// src/pages/client/Contracts.tsx
 import { useEffect, useState } from "react";
 import { listMyContracts } from "../../api/contracts";
 
 export default function ClientContracts() {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        setRows(await listMyContracts());
+        const data = await listMyContracts();
+        console.log("[ClientContracts] rows from API:", data);
+        setRows(data);
+      } catch (e: any) {
+        console.error("[ClientContracts] error:", e?.response?.data || e);
+        setErr(
+          e?.response?.data?.error || e?.message || "Failed to load contracts"
+        );
       } finally {
         setLoading(false);
       }
@@ -16,6 +25,7 @@ export default function ClientContracts() {
   }, []);
 
   if (loading) return <div>Loading…</div>;
+  if (err) return <div className="text-red-600">{err}</div>;
 
   return (
     <div className="space-y-4">

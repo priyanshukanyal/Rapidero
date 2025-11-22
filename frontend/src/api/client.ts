@@ -1,35 +1,9 @@
-// // src/api/client.ts
-// import api from "../lib/api";
-
-// export async function getClientDashboard() {
-//   const { data } = await api.get("/clients/me/dashboard");
-//   return data;
-// }
-// // export async function getClientDashboard() {
-// //   const { data } = await api.get("/client/me/dashboard");
-// //   return data as {
-// //     delivered: number;
-// //     in_transit: number;
-// //     rto: number;
-// //     total: number;
-// //     series: { d: string; c: number }[];
-// //   };
-// // }
-// export async function listMyConsignments() {
-//   const { data } = await api.get("/consignments"); // server scopes by token
-//   return data as any[];
-// }
-// export async function getMyConsignment(id: string) {
-//   const { data } = await api.get(`/consignments/${id}`);
-//   return data as any;
-// }
-// export async function getMyTracking(id: string) {
-//   const { data } = await api.get(`/consignments/${id}/tracking`);
-//   return data as any[];
-// }
 // src/api/client.ts
 import api from "../lib/api";
-// src/api/clients.ts
+
+/* -------------------------------------------------------------------------- */
+/*                       Admin / OPS: Client management                       */
+/* -------------------------------------------------------------------------- */
 
 export interface ClientLite {
   id: string;
@@ -47,23 +21,32 @@ export interface CreateClientPayload {
   website?: string;
 }
 
-/** Admin/OPS: list all clients (backend already paginates/limits) */
+/**
+ * Admin/OPS: list all clients.
+ * Backend can paginate/limit as needed.
+ */
 export async function listClients(): Promise<ClientLite[]> {
   const { data } = await api.get<ClientLite[]>("/clients");
   return data;
 }
 
-/** Admin/OPS: create a client */
-export async function createClient(payload: CreateClientPayload) {
+/**
+ * Admin/OPS: create a new client.
+ */
+export async function createClient(
+  payload: CreateClientPayload
+): Promise<{ ok: boolean; client_code: string }> {
   const { data } = await api.post("/clients", payload);
   return data as { ok: boolean; client_code: string };
 }
 
-/* ---------- Types ---------- */
+/* -------------------------------------------------------------------------- */
+/*                          Client portal: Dashboard                          */
+/* -------------------------------------------------------------------------- */
 
 export interface DashboardPoint {
   d: string; // YYYY-MM-DD
-  c: number; // count for the day
+  c: number; // count for that day
 }
 
 export interface ClientDashboard {
@@ -74,6 +57,37 @@ export interface ClientDashboard {
   series: DashboardPoint[];
 }
 
+/**
+ * Client portal: dashboard for the logged-in client user.
+ * Backend should scope by req.user.client_id.
+ */
+export async function getClientDashboard(
+  signal?: AbortSignal
+): Promise<ClientDashboard> {
+  try {
+    const { data } = await api.get<ClientDashboard>("/clients/me/dashboard", {
+      signal,
+    });
+    return data;
+  } catch (err: any) {
+    // If user isn't linked to a client yet, avoid crashing UI
+    if (err?.response?.status === 403) {
+      return {
+        delivered: 0,
+        in_transit: 0,
+        rto: 0,
+        total: 0,
+        series: [],
+      };
+    }
+    throw err;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                      Client portal: Consignments (CNs)                     */
+/* -------------------------------------------------------------------------- */
+
 export interface ConsignmentLite {
   id: string;
   cn_number: string;
@@ -82,11 +96,10 @@ export interface ConsignmentLite {
   shipper_city?: string | null;
   consignee_city?: string | null;
   package_count?: number;
-  // add any other fields your list endpoint returns
+  // add more list fields if your endpoint returns them
 }
 
 export interface ConsignmentDetail extends ConsignmentLite {
-  // include extra fields the detail endpoint returns
   invoices?: Array<{
     id: string;
     invoice_number: string;
@@ -113,44 +126,21 @@ export interface ConsignmentDetail extends ConsignmentLite {
 }
 
 export interface ConsignmentListQuery {
-  status?: string; // e.g. 'DELIVERED' | 'IN_TRANSIT' etc. (if your backend supports)
+  status?: string; // e.g. 'DELIVERED', 'IN_TRANSIT'
   from?: string; // 'YYYY-MM-DD'
   to?: string; // 'YYYY-MM-DD'
-  search?: string; // by cn_number, company, etc. (backend-dependent)
-  page?: number; // 1-based
+  search?: string; // CN number, city, etc. (backend decides)
+  page?: number; // 1-based page
   limit?: number; // items per page
-  sort?: string; // e.g. '-created_at' or 'created_at'
-}
-
-/* ---------- API Calls ---------- */
-
-export async function getClientDashboard(
-  signal?: AbortSignal
-): Promise<ClientDashboard> {
-  try {
-    const { data } = await api.get<ClientDashboard>("/clients/me/dashboard", {
-      signal,
-    });
-    // API returns exact shape, so just pass through
-    return data;
-  } catch (err: any) {
-    // If user is not linked yet, avoid null crashing the UI
-    if (err?.response?.status === 403) {
-      return {
-        delivered: 0,
-        in_transit: 0,
-        rto: 0,
-        total: 0,
-        series: [],
-      };
-    }
-    throw err;
-  }
+  sort?: string; // e.g. '-created_at'
 }
 
 /**
- * Lists the consignments visible to the logged-in user.
- * The backend auto-scopes to the tenant for CLIENT users.
+ * Client portal: list consignments visible to the logged-in user.
+ *
+ * For CLIENT role, backend should:
+ *   - scope to req.user.client_id (and its contracts)
+ *   - ignore any foreign client_id in query to prevent data leaks
  */
 export async function listMyConsignments(
   query: ConsignmentListQuery = {},
@@ -163,6 +153,9 @@ export async function listMyConsignments(
   return data;
 }
 
+/**
+ * Client portal: get detail of a single consignment that belongs to this client.
+ */
 export async function getMyConsignment(
   id: string,
   signal?: AbortSignal
@@ -173,6 +166,9 @@ export async function getMyConsignment(
   return data;
 }
 
+/**
+ * Client portal: get tracking events for a consignment that belongs to this client.
+ */
 export async function getMyTracking(
   id: string,
   signal?: AbortSignal

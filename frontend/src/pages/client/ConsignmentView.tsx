@@ -10,14 +10,16 @@ export default function ClientCNView() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!id) return;
+
     (async () => {
       try {
         const [a, b] = await Promise.all([
-          getMyConsignment(id!),
-          getMyTracking(id!),
+          getMyConsignment(id),
+          getMyTracking(id),
         ]);
         setCn(a);
-        // setTrack(b);
+        setTrack(b || []);
       } finally {
         setLoading(false);
       }
@@ -71,6 +73,7 @@ export default function ClientCNView() {
     </div>
   );
 }
+
 function Info({ title, value }: { title: string; value: any }) {
   return (
     <div className="bg-white rounded-xl p-4 shadow">

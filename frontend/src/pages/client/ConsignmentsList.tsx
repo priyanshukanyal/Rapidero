@@ -6,18 +6,22 @@ import { Link } from "react-router-dom";
 export default function ClientCNList() {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
   useEffect(() => {
     (async () => {
       try {
-        setRows(await listMyConsignments());
+        // 🔒 Only consignments belonging to this client
+        const data = await listMyConsignments();
+        setRows(data);
       } finally {
         setLoading(false);
       }
     })();
   }, []);
+
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Consignments</h1>
+      <h1 className="text-xl font-semibold">My Consignments</h1>
       <div className="bg-white rounded-xl shadow overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50">

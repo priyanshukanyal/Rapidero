@@ -1195,10 +1195,17 @@ export const createContract = asyncHandler(
 );
 
 /* ------------------------------- NEW: My list ------------------------------ */
+// in contracts.controller.ts
 export const listMyContracts = asyncHandler(
   async (req: Request, res: Response) => {
-    const clientId = (req as any).user?.client_id;
-    if (!clientId) return res.status(403).json({ error: "Forbidden" });
+    const user = (req as any).user;
+    console.log("[listMyContracts] user:", user);
+
+    const clientId = user?.client_id;
+    if (!clientId) {
+      console.log("[listMyContracts] NO client_id → 403");
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
     const [rows]: any = await pool.query(
       `SELECT c.id,
@@ -1219,6 +1226,8 @@ export const listMyContracts = asyncHandler(
         LIMIT 200`,
       [clientId]
     );
+
+    console.log("[listMyContracts] client_id:", clientId, "rows:", rows.length);
 
     res.json(rows);
   }
