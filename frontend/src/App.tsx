@@ -26,6 +26,10 @@ import ClientContracts from "./pages/client/Contracts";
 import ClientCNList from "./pages/client/ConsignmentsList";
 import ClientCNView from "./pages/client/ConsignmentView";
 
+// ⬇️ NEW: invoices pages
+import AdminInvoicesPage from "./pages/admin/InvoicesPage";
+import ClientInvoicesPage from "./pages/client/Invoices";
+
 export default function App() {
   return (
     <Routes>
@@ -60,6 +64,9 @@ export default function App() {
           <Route path="cn" element={<CnDashboard />} />
           <Route path="cn/create" element={<CnCreate />} />
           <Route path="cn/:cnNumber" element={<CnDetail />} />
+
+          {/* ⬇️ NEW: Admin/OPS invoices list */}
+          <Route path="invoices" element={<AdminInvoicesPage />} />
         </Route>
 
         {/* --------------------- FIELD EXEC AREA --------------------- */}
@@ -74,6 +81,9 @@ export default function App() {
           <Route path="client/contracts" element={<ClientContracts />} />
           <Route path="client/consignments" element={<ClientCNList />} />
           <Route path="client/consignments/:id" element={<ClientCNView />} />
+
+          {/* ⬇️ NEW: client’s own invoices */}
+          <Route path="client/invoices" element={<ClientInvoicesPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

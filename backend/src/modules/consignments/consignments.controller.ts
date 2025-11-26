@@ -71,7 +71,7 @@ export const createCnFromUI = asyncHandler(
       0
     );
 
-    // Local CN number (internal). Abhi ke liye system ka hi CN, Rivigo CN alag se response me bhejenge
+    // Local CN number (internal)
     const cnNumber = body.cnNumber || `CN${Date.now()}`;
 
     const packingType = toCode(f.packingType, [
@@ -89,6 +89,10 @@ export const createCnFromUI = asyncHandler(
       "NORMAL",
       "EXPRESS",
     ]);
+
+    // 🔹 Multi-tenant: prefer body.clientId (admin UI), else token client_id (client portal)
+    const cidFromToken = tokenClientId(req);
+    const clientId: string | null = body.clientId || cidFromToken || null;
 
     // 🟢 Step 1: Rivigo pe booking create karo
     let rivigo: RivigoBookingResult | null = null;
@@ -113,16 +117,14 @@ export const createCnFromUI = asyncHandler(
         "[CN:UI] Rivigo booking FAILED:",
         err?.response?.data || err.message || err
       );
-      // Abhi ke liye error bubble karne de, taaki Postman/Frontend me clear dikhe
       throw err;
     }
 
-    // 🟢 Step 2: Apne MySQL DB me consignment save karo (same as before)
+    // 🟢 Step 2: Apne MySQL DB me consignment save karo
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
 
-      // Main consignment row
       await conn.query(
         `INSERT INTO consignments
          (id, cn_number, client_id, client_name_snapshot, billing_entity_name, client_shipment_code,
@@ -149,7 +151,7 @@ export const createCnFromUI = asyncHandler(
         `,
         [
           cnNumber,
-          body.clientId || null,
+          clientId, // 🔹 now coming from dropdown or token
           f.client || null,
           f.billingEntity || null,
           f.clientShipmentCode || null,
@@ -197,7 +199,6 @@ export const createCnFromUI = asyncHandler(
         ]
       );
 
-      // Get the consignment id we just inserted
       const [[cn]]: any = await conn.query(
         `SELECT id FROM consignments WHERE cn_number=? LIMIT 1`,
         [cnNumber]
@@ -206,7 +207,7 @@ export const createCnFromUI = asyncHandler(
 
       console.log("[CN:UI] Inserted consignment id:", consignmentId);
 
-      // 🟢 NEW: Save Rivigo response into consignments table
+      // 🟢 Save Rivigo fields
       if (rivigo) {
         await conn.query(
           `UPDATE consignments
@@ -285,7 +286,6 @@ export const createCnFromUI = asyncHandler(
 
       console.log("[CN:UI] CN created in DB with id:", consignmentId);
 
-      // 🟢 Final response – yaha Rivigo ke important fields bhi bhej rahe hain
       res.status(201).json({
         ok: true,
         id: consignmentId,
@@ -366,10 +366,9 @@ export const listConsignments = asyncHandler(
     const params: any[] = [];
     let where = " WHERE 1=1 ";
 
-    // Multi-tenant: non-admin can only see their own client_id
     if (!isAdminOrOps(req)) {
       const cid = tokenClientId(req);
-      if (!cid) return res.json([]); // no tenant → no data
+      if (!cid) return res.json([]);
       where += " AND client_id = ? ";
       params.push(cid);
     }

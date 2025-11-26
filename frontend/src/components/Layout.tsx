@@ -52,6 +52,15 @@ export default function Layout() {
               >
                 Create Contract
               </NavLink>
+              {/* ⬇️ NEW: invoices menu for admin/ops */}
+              <NavLink
+                to="/invoices"
+                className={({ isActive }) =>
+                  isActive ? "font-semibold text-brand" : "text-gray-700"
+                }
+              >
+                Invoices
+              </NavLink>
             </>
           )}
 
@@ -82,6 +91,15 @@ export default function Layout() {
                 }
               >
                 My Contracts
+              </NavLink>
+              {/* ⬇️ NEW: client invoices */}
+              <NavLink
+                to="/client/invoices"
+                className={({ isActive }) =>
+                  isActive ? "font-semibold text-brand" : "text-gray-700"
+                }
+              >
+                My Invoices
               </NavLink>
             </>
           )}

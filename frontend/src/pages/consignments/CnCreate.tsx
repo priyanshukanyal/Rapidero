@@ -1,4 +1,5 @@
-﻿import { useMemo, useState } from "react";
+﻿// src/pages/consignments/CnCreate.tsx
+import { useEffect, useMemo, useState } from "react";
 import api from "../../lib/api";
 
 type Invoice = {
@@ -12,68 +13,78 @@ type Invoice = {
 
 type Pkg = {
   id: number;
-  length: string; // dimensions in selected unit
+  length: string;
   breadth: string;
   height: string;
   count: string;
 };
 
-export default function CnCreate() {
-  const [formData, setFormData] = useState<any>({
-    // ---------- PRIMARY ----------
-    client: "TEST COMPANY LTD",
-    billingEntity: "TEST COMPANY LTD",
-    clientShipmentCode: "PEFTEST01",
-    // 1574361000000 → 2019-11-21T18:30:00Z approx
-    bookingDateTime: "2019-11-21T18:30",
+type Client = {
+  id: string;
+  client_code: string;
+  client_name: string;
+  email: string;
+  phone: string;
+  created_at: string;
+};
 
+export default function CnCreate() {
+  const [clients, setClients] = useState<Client[]>([]);
+  const [clientId, setClientId] = useState<string>("");
+
+  const [formData, setFormData] = useState<any>({
+    // PRIMARY (will be auto-filled partly on client select)
+    client: "",
+    billingEntity: "",
+    clientShipmentCode: "",
+    bookingDateTime: "",
     noOfPackages: "1",
-    content: "Clothes",
-    packingType: "BOX", // will map to packaging "CARTON" later in Rivigo body
-    chargeBasis: "Weight",
-    conversionFactor: "5000", // cm3/kg
+    content: "",
+    packingType: "BOX",
+    chargeBasis: "WEIGHT",
+    conversionFactor: "5000",
     mode: "SURFACE",
-    declaredValue: "500",
+    declaredValue: "",
     codAmount: "",
 
-    // ---------- PARTNER From (Consignor) ----------
-    consignorAddress: "TEST WAREHOUSE, DELHI",
-    consignorName: "Sender Test",
-    consignorPhone: "9000000001",
-    consignorEmail: "sender@test.com",
-    consignorCompany: "TEST COMPANY LTD",
-    consignorGSTIN: "27AACCH8930K1A1",
-    consignorPAN: "ABCDE1234F",
-    consignorCity: "Delhi",
-    consignorPincode: "110021",
-    consignorLatitude: "28.5884",
-    consignorLongitude: "77.1859",
+    // Consignor
+    consignorAddress: "",
+    consignorName: "",
+    consignorPhone: "",
+    consignorEmail: "",
+    consignorCompany: "",
+    consignorGSTIN: "",
+    consignorPAN: "",
+    consignorCity: "",
+    consignorPincode: "",
+    consignorLatitude: "",
+    consignorLongitude: "",
     pickupFloorNumber: "1",
-    originState: "Delhi",
+    originState: "",
 
-    // ---------- PARTNER To (Consignee) ----------
-    consigneeAddress: "TEST STREET 123, HYDERABAD",
-    consigneeName: "Receiver Test",
-    consigneePhone: "9876543210",
-    consigneeEmail: "receiver@test.com",
-    consigneeCompany: "BLUE APPARELS",
-    consigneeGSTIN: "27AACCH8930K1B2",
-    consigneePAN: "XYZAB1234X",
-    consigneeCity: "Hyderabad",
-    consigneePincode: "560001",
-    consigneeLatitude: "17.5186",
-    consigneeLongitude: "78.3963",
+    // Consignee
+    consigneeAddress: "",
+    consigneeName: "",
+    consigneePhone: "",
+    consigneeEmail: "",
+    consigneeCompany: "",
+    consigneeGSTIN: "",
+    consigneePAN: "",
+    consigneeCity: "",
+    consigneePincode: "",
+    consigneeLatitude: "",
+    consigneeLongitude: "",
     deliveryFloorNumber: "1",
-    destinationState: "Telangana",
+    destinationState: "",
 
-    // ---------- PACKAGE / SERVICE ----------
-    unit: "IN", // match Rivigo sample
-    weight: "0.5",
+    // PACKAGE / SERVICE
+    unit: "CM",
+    weight: "",
     deliveryType: "NORMAL",
     serviceCategory: "NORMAL",
     barcodeType: "PREPRINTED",
 
-    // ---------- VAS / flags ----------
+    // VAS
     valueAddedServices: {
       fragile: false,
       liquidHandling: false,
@@ -81,89 +92,57 @@ export default function CnCreate() {
     isHazardousMaterialApplicable: false,
     isDacc: false,
 
-    // ---------- Rivigo-style extra fields ----------
+    // Rivigo extra
     retailType: "NORMAL",
     paymentMode: "PAID",
-    taxId: "ABCDE1234F",
+    taxId: "",
     taxIdType: "PAN",
     toPayAmount: "0",
-    appointmentId: "A001",
-    appointmentTime: "2019-11-21T18:30",
+    appointmentId: "",
+    appointmentTime: "",
     deliveryClient: "OTHERS",
-    deliveryClientFcName: "Test FC",
-    poExpiryTime: "2021-09-09T03:30",
-    poOrderNumber: "PO123456",
+    deliveryClientFcName: "",
+    poExpiryTime: "",
+    poOrderNumber: "",
     poNumberOfItems: "1",
 
-    routeHint: "DEL-HYD",
-    remarks: "Demo test booking",
+    routeHint: "",
+    remarks: "",
 
-    // identifiers
-    cnNumber: "", // leave blank so Rivigo can generate cnote later
-    clientCode: "RAPID1", // from your env
+    cnNumber: "",
+    clientCode: "RAPID1",
   });
 
   const [invoices, setInvoices] = useState<Invoice[]>([
     {
       id: 1,
-      invoiceNumber: "INV001",
-      amount: "500",
-      ewaybillNumber: "123123123123",
-      hsnCode: "4901",
-      hsnAmount: "300",
+      invoiceNumber: "",
+      amount: "",
+      ewaybillNumber: "",
+      hsnCode: "",
+      hsnAmount: "",
     },
   ]);
 
   const [packages, setPackages] = useState<Pkg[]>([
-    {
-      id: 1,
-      length: "10",
-      breadth: "5",
-      height: "6",
-      count: "1",
-    },
+    { id: 1, length: "", breadth: "", height: "", count: "1" },
   ]);
 
-  // NEW: barcodes list (system-generated or pre-printed) – just stored in raw_request_json
-  const [barcodes, setBarcodes] = useState<string[]>(["TEST000111212"]);
+  const [barcodes, setBarcodes] = useState<string[]>([""]);
 
-  const addInv = () =>
-    setInvoices((v) => [
-      ...v,
-      {
-        id: v.length + 1,
-        invoiceNumber: "",
-        amount: "",
-        ewaybillNumber: "",
-        hsnCode: "",
-        hsnAmount: "",
-      },
-    ]);
+  // ------------------------ Load clients ------------------------
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await api.get<Client[]>("/clients");
+        setClients(data || []);
+      } catch (err) {
+        console.error("Failed to load clients", err);
+      }
+    })();
+  }, []);
 
-  const rmInv = (id: number) =>
-    setInvoices((v) => v.filter((x) => x.id !== id));
-
-  const setInv = (id: number, patch: Partial<Invoice>) =>
-    setInvoices((v) => v.map((x) => (x.id === id ? { ...x, ...patch } : x)));
-
-  const addPkg = () =>
-    setPackages((v) => [
-      ...v,
-      { id: v.length + 1, length: "", breadth: "", height: "", count: "1" },
-    ]);
-
-  const rmPkg = (id: number) =>
-    setPackages((v) => v.filter((x) => x.id !== id));
-
-  const setPkg = (id: number, patch: Partial<Pkg>) =>
-    setPackages((v) => v.map((x) => (x.id === id ? { ...x, ...patch } : x)));
-
-  const addBarcode = () => setBarcodes((v) => [...v, ""]);
-  const rmBarcode = (idx: number) =>
-    setBarcodes((v) => v.filter((_, i) => i !== idx));
-  const setBarcode = (idx: number, val: string) =>
-    setBarcodes((v) => v.map((b, i) => (i === idx ? val : b)));
-
+  // ------------------------ Helpers ------------------------
   const num = (s: any) => (isNaN(Number(s)) ? 0 : Number(s));
 
   const volumetricWeight = useMemo(() => {
@@ -191,6 +170,11 @@ export default function CnCreate() {
     [invoices]
   );
 
+  const totalBoxes = useMemo(
+    () => packages.reduce((t, p) => t + num(p.count || 1), 0),
+    [packages]
+  );
+
   const update = (k: string, v: any) =>
     setFormData((p: any) => ({ ...p, [k]: v }));
 
@@ -203,16 +187,75 @@ export default function CnCreate() {
       ),
   });
 
-  const totalBoxes = useMemo(
-    () => packages.reduce((t, p) => t + num(p.count || 1), 0),
-    [packages]
-  );
+  // ------------------- Client select → auto-fill -------------------
+  const handleClientSelect = (id: string, list?: Client[]) => {
+    const src = list || clients;
+    setClientId(id);
+    const client = src.find((c) => c.id === id);
+    if (!client) return;
 
-  // -------------------- SUBMIT → backend /consignments/ui --------------------
+    setFormData((prev: any) => ({
+      ...prev,
+      client: client.client_name,
+      billingEntity: client.client_name || prev.billingEntity,
+      clientCode: client.client_code || prev.clientCode,
+
+      consignorName: client.client_name || prev.consignorName,
+      consignorPhone: client.phone || prev.consignorPhone,
+      consignorEmail: client.email || prev.consignorEmail,
+      consignorCompany: client.client_name || prev.consignorCompany,
+    }));
+  };
+
+  // ------------------- Invoices helpers -------------------
+  const addInv = () =>
+    setInvoices((v) => [
+      ...v,
+      {
+        id: v.length + 1,
+        invoiceNumber: "",
+        amount: "",
+        ewaybillNumber: "",
+        hsnCode: "",
+        hsnAmount: "",
+      },
+    ]);
+
+  const rmInv = (id: number) =>
+    setInvoices((v) => v.filter((x) => x.id !== id));
+
+  const setInv = (id: number, patch: Partial<Invoice>) =>
+    setInvoices((v) => v.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+
+  // ------------------- Packages helpers -------------------
+  const addPkg = () =>
+    setPackages((v) => [
+      ...v,
+      { id: v.length + 1, length: "", breadth: "", height: "", count: "1" },
+    ]);
+
+  const rmPkg = (id: number) =>
+    setPackages((v) => v.filter((x) => x.id !== id));
+
+  const setPkg = (id: number, patch: Partial<Pkg>) =>
+    setPackages((v) => v.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+
+  // ------------------- Barcode helpers -------------------
+  const addBarcode = () => setBarcodes((v) => [...v, ""]);
+  const rmBarcode = (idx: number) =>
+    setBarcodes((v) => v.filter((_, i) => i !== idx));
+  const setBarcode = (idx: number, val: string) =>
+    setBarcodes((v) => v.map((b, i) => (i === idx ? val : b)));
+
+  // ------------------- Submit → backend -------------------
   const submit = async () => {
     try {
+      if (!clientId) {
+        alert("Please select a client");
+        return;
+      }
+
       const required = [
-        "client",
         "consignorName",
         "consignorPhone",
         "consignorAddress",
@@ -235,8 +278,8 @@ export default function CnCreate() {
         return;
       }
 
-      // Attach barcodes into formData (for storing in raw_request_json)
       const payload = {
+        clientId, // 🔹 goes into consignments.client_id
         formData: {
           ...formData,
           barcodes:
@@ -277,7 +320,7 @@ export default function CnCreate() {
     }
   };
 
-  // ------------------------------ JSX layout ------------------------------
+  // ------------------------------ JSX ------------------------------
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Create Consignment (CN)</h1>
@@ -286,11 +329,20 @@ export default function CnCreate() {
       <section className="bg-white p-6 rounded-xl shadow grid md:grid-cols-3 gap-4">
         <div>
           <label className="block text-sm mb-1">Client *</label>
-          <input
+          <select
             className="w-full border rounded-md px-3 py-2"
-            {...bind("client")}
-          />
+            value={clientId}
+            onChange={(e) => handleClientSelect(e.target.value)}
+          >
+            <option value="">Select client</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.client_name} ({c.client_code})
+              </option>
+            ))}
+          </select>
         </div>
+
         <div>
           <label className="block text-sm mb-1">Client Code (Rivigo)</label>
           <input
@@ -359,7 +411,7 @@ export default function CnCreate() {
         </div>
       </section>
 
-      {/* PARTNER: Consignor / Consignee */}
+      {/* Consignor / Consignee */}
       <section className="bg-white p-6 rounded-xl shadow grid md:grid-cols-2 gap-6">
         <div className="grid gap-3">
           <div className="font-medium">Consignor *</div>
@@ -783,7 +835,7 @@ export default function CnCreate() {
         </div>
       </section>
 
-      {/* RIVIGO SPECIALS (stored but not sent to Rivigo yet) */}
+      {/* Rivigo extras */}
       <section className="bg-white p-6 rounded-xl shadow grid md:grid-cols-3 gap-4">
         <div>
           <label className="block text-sm mb-1">Retail Type</label>
@@ -820,7 +872,7 @@ export default function CnCreate() {
           />
         </div>
         <div>
-          <label className="block text.sm mb-1">Tax ID Type</label>
+          <label className="block text-sm mb-1">Tax ID Type</label>
           <select
             className="w-full border rounded-md px-3 py-2"
             {...bind("taxIdType")}
@@ -889,7 +941,7 @@ export default function CnCreate() {
         </div>
       </section>
 
-      {/* ROUTE / REMARKS */}
+      {/* Route / remarks */}
       <section className="bg-white p-6 rounded-xl shadow grid md:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm mb-1">Route hint</label>
